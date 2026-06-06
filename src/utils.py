@@ -22,6 +22,8 @@ def parse_args():
   
   parser.add_argument('--mapping', type=str, required=True)
 
+  parser.add_argument('--max_retries', type=int, default=3)
+
   parser.add_argument('--n_samples', type=int, default=Config.N_SAMPLES, 
                       help="Number of individuals to generate in the dataset.")
   parser.add_argument('--s_prevalence', type=float, default=Config.S_PREV, 

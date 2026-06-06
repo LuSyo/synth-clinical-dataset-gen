@@ -5,7 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
-from workflow.schema import GraphState, ExtractedDatasetParams
+from workflow.schema import GraphState, ExtractedDatasetParams, DatasetValidationResult
 from generation.features import generate_clinical_ground_truth, generate_observed_features
 from generation.analysis import run_dataset_diagnostics, run_downstream_probe
 from utils import Config as CoreConfig
@@ -155,26 +155,101 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
     "probe_results": probe_results
   }
 
-# def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:
-#   print("---> Validating generated dataset")
+def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:
+  """
+  LLM node: Inspects the original user query, the feature map parameters,
+  the data summary (Table One), and downstream classifier probe results to validate 
+  if the user's expectations and target disparities are satisfied.
+  """
+  print("---> Validating generated dataset against user's expectations")
 
-#   if state.df is None:
-#     print("Error: No dataset found in state.")
-#     return {"validation_status": "generation_failure"}
+  if state.df is None:
+    print("Error: No dataset found in state to validate.")
+    return {"validation_passed": False}
 
-#   dataset = state.df
+  # Get the Table One
+  metadata = config.get("metadata") or {}
+  exp_name = metadata.get("exp_name", "default_exp")
+  run_name = metadata.get("run_name", "default_run")
+  output_dir = f"{CoreConfig.DATA_DIR}/{exp_name}/{run_name}"
 
-#   actual_n = len(dataset)
-#   actual_s_prev = (dataset['S'] == 1).mean()
-#   actual_y_prev = (dataset['Y'] == 1).mean()
+  table_one_path = os.path.join(output_dir, "table_one.txt")
+  table_one_content = "Table One artifact not found."
+  if os.path.exists(table_one_path):
+    with open(table_one_path, "r") as f:
+      table_one_content = f.read()
 
-#   summary_msg = (
-#     f"Target vs Actual Metrics:\n"
-#     f" - Samples (N): Target={state.n_samples} | Actual={actual_n}\n"
-#     f" - Majority Prevalence (S=1): Target={state.s_prevalence} | Actual={actual_s_prev:.4f}\n"
-#     f" - Outcome Prevalence (Y=1): Target={state.y_prevalence} | Actual={actual_y_prev:.4f}"
-#   )
-  
-#   original_user_query = state.messages[0].content
+  # User expectations
+  user_query = state.messages[0].content
 
-#   return {}
+  # Feature map, including feature parameters
+  feature_map_str = json.dumps(state.feature_map, indent=2)
+
+  # Downstream probe results
+  probe_results_str = state.probe_results or "No probe results available."
+
+  formulas_context = """
+  ### Feature Generation Mechanics Context:
+  - Clinical Ground Truth Latents:
+    * H (Central health latent) ~ Gamma(shape=2.0, scale=1.5)
+    * S (Sensitive attribute) ~ Bernoulli(s_prevalence)
+    * U_dep (S-related latent) depends on H and S
+      - If S == 0: latent_link = 0.75, noise_multiplier = 0.2
+      - If S == 1: latent_link = 1.00, noise_multiplier = 3.0
+      - U_dep ~ (latent_link * H) + noise_multiplier * Gamma(shape=1.2, scale=1)
+    * U_indep (S-independent latent) depends on H only: 
+      - U_indep ~ 0.6 * H + Gamma(shape=2.1, scale=1)
+    * Y (Clinical outcome):
+      - Y ~ Bernoulli(sigmoid(beta_0 + 1.5 * normalized(log(U_dep + U_indep))))
+      - Note: beta_0 is calibrated via bisection search to exactly enforce the target y_prevalence.
+  - Pathway Mappings to Latents:
+    * "bio" features descend from latent U_dep
+    * "soc" features descend from latent U_indep
+    * "ind" features descend from latent U_indep
+  - Observed Features (from Feature Map):
+    * Continuous (Normal): X = gamma * Latent + beta + Normal(0, noise_std)
+    * Continuous (Lognormal): X = exp(gamma * Latent + beta + Normal(0, noise_std))
+    * Binary: P(X=1) = sigmoid(gamma * Latent + beta)
+    * Categorical: Digitize an underlying continuous signal [gamma * Latent + Normal(0, noise_std)]
+      - Note: The n-1 class boundaries are calculated between the 5th and 95th percentiles of the continuous signal.
+  """
+
+  llm = metadata["validation_llm"]
+  structured_llm = llm.with_structured_output(DatasetValidationResult)
+
+  prompt = ChatPromptTemplate.from_messages([
+    ("system", (
+      "You are an expert ML and Data Engineer assessing a synthetic dataset generation pipeline.\n"
+      "Your objective is to verify if the generated dataset aligns with the user's approximate target "
+      "predictive performance and group disparities as described in their original query.\n\n"
+      "{formulas_context}\n\n"
+      "### Current Feature Configuration (Feature Map):\n"
+      "{feature_map}\n\n"
+      "### Generated Dataset Summary (Table One):\n"
+      "{table_one}\n\n"
+      "### Downstream Classifier Performance & Disparities:\n"
+      "{probe_results}\n\n"
+      "Carefully analyze if the performance disparities or criteria specified in the user's query match "
+      "the metrics shown above. Allow for slight stochastic variation. Provide your reasoning."
+    )),
+    ("human", "Original User Query / Expectations:\n{query}")
+  ])
+
+  chain = prompt | structured_llm
+  result: DatasetValidationResult = chain.invoke({
+    "formulas_context": formulas_context,
+    "feature_map": feature_map_str,
+    "table_one": table_one_content,
+    "probe_results": probe_results_str,
+    "query": user_query
+  })
+
+  print(f"     [Evaluation Reasoning]: {result.reasoning}")
+  print(f"     [Result Passed]: {result.is_acceptable}")
+
+  next_retry_count = state.retry_count if result.is_acceptable else state.retry_count + 1
+
+  return {
+    "validation_passed": result.is_acceptable,
+    "retry_count": next_retry_count
+  }

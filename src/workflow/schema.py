@@ -24,20 +24,21 @@ class GraphState(BaseModel):
 
   # Pipeline Artifact Tracking
   dataset_path: Optional[str] = Field(default=None, description="Local path to the currently generated CSV dataset.")
+  
   validation_passed: bool = Field(default=False, description="Whether the generated dataset successfully met all acceptance criteria.")
-
-  validation_status: Literal["valid", "retry_extraction", "generation_failure", "pending"] = Field(
-    default="pending", 
-    description="The resulting status from the dataset evaluation node."
-  )
   retry_count: int = Field(
     default=0, 
-    description="Tracks how many times the extraction/generation loop has been attempted."
+    description="Tracks how many times the generation loop has been attempted."
   )
   max_retries: int = Field(
     default=3, 
     description="The upper boundary ceiling to prevent infinite looping."
   )
+  # validation_status: Literal["valid", "retry_extraction", "generation_failure", "pending"] = Field(
+  #   default="pending", 
+  #   description="The resulting status from the dataset evaluation node."
+  # )
+  
 
   def __repr__(self):
     return (f"GraphState(messages_count={len(self.messages)}, "
@@ -62,18 +63,6 @@ class DatasetValidationResult(BaseModel):
   is_acceptable: bool = Field(
     description="True if the actual metrics are reasonably close to the targets (allowing for small stochastic sampling variance), False if they diverge significantly."
   )
-  extracted_params_match_query: bool = Field(
-    description="True if the currently extracted parameters correctly reflect the explicit request in the original user query. False if the extraction node made a mistake (e.g., swapped minority/majority rates)."
-  )
-  corrected_n_samples: Optional[int] = Field(
-    default=None, description="The corrected number of samples parsed from the query if a mistake was made."
-  )
-  corrected_s_prevalence: Optional[float] = Field(
-    default=None, description="The corrected majority prevalence (S=1) parsed from the query if a mistake was made."
-  )
-  corrected_y_prevalence: Optional[float] = Field(
-    default=None, description="The corrected outcome prevalence (Y=1) parsed from the query if a mistake was made."
-  )
   reasoning: str = Field(
-    description="A concise explanation detailing your evaluation of the dataset vs targets vs user query."
+    description="A concise explanation detailing your evaluation of the dataset vs user expectations."
   )

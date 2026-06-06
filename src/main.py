@@ -39,9 +39,9 @@ def main():
   app = build_graph()
 
   # Set up the RunnableConfig
-  generate_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, seed=args.seed)
+  validation_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, seed=args.seed)
   config = RunnableConfig(metadata={
-    "generate_llm": generate_llm,
+    "validation_llm": validation_llm,
     "exp_name": args.exp_name,
     "run_name": args.run_name,
     "rng": rng
@@ -57,6 +57,7 @@ def main():
       s_prevalence=args.s_prevalence,
       y_prevalence=args.y_prevalence,
       feature_map=feature_map,
+      max_retries=args.max_retries,
       seed=args.seed
     )
 
