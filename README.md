@@ -3,6 +3,7 @@
 This tool automatically generates synthetic medical datasets to test how machine learning models handle demographic bias and develop effective mitigation methods. Instead of requiring manual data tweaking, it uses an LLM feedback loop built with LangGraph to dynamically adjust the properties, distributions, and shapes of the data to elad to the required population characteristics and predictive disparities. 
 
 The pipeline simulates underlying patient health states alongside configurable clinical features and systemic bias to intentionally induce performance gaps between subgroups. Every run automatically tracks the exact mathematical parameters used to generate the dataset and tests the final dataset with a classifier probe to report predictive disparities.
+
 ---
 
 ## Causal structural framework
