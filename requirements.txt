@@ -1,0 +1,12 @@
+mlflow
+numpy
+pandas
+seaborn
+langchain
+langchain-openai
+langchain_text_splitters
+langchain-chroma
+langgraph
+pydantic
+scipy
+tableone
