@@ -45,18 +45,28 @@ class GraphState(BaseModel):
             f"targets=[N={self.n_samples}, S_prev={self.s_prevalence}, Y_prev={self.y_prevalence}], "
             f"valid={self.validation_passed})")
 
-class ExtractedDatasetParams(BaseModel):
-  n_samples: Optional[int] = Field(
-    default=None, 
-    description="The number of individuals/samples requested. E.g., 5000."
+class FeatureParameterOverride(BaseModel):
+  pathway: Literal["bio", "soc", "ind"] = Field(
+    description="The pathway category where the feature resides ('bio', 'soc', or 'ind')."
   )
-  s_prevalence: Optional[float] = Field(
-    default=None, 
-    description="The prevalence of the majority group (S=1), expressed as a float between 0 and 1. E.g., 0.60 for 60%."
+  name: str = Field(
+    description="The exact name of the feature to adjust (e.g., 'b1')."
   )
-  y_prevalence: Optional[float] = Field(
+  gamma: Optional[float] = Field(
     default=None, 
-    description="The prevalence of the clinical outcome (Y=1), expressed as a float between 0 and 1. E.g., 0.15 for 15%."
+    description="The fine-tuned directional weight coefficient. Adjust to change feature-latent correlation strength."
+  )
+  beta: Optional[float] = Field(
+    default=None, 
+    description="The fine-tuned intercept shift coefficient. Adjust to shift binary prevalence baseline rates."
+  )
+  noise_std: Optional[float] = Field(
+    default=None, 
+    description="The fine-tuned standard deviation of feature noise. Increase to dilute feature predictive power."
+  )
+  absolute_thresholds: Optional[List[float]] = Field(
+    default=None, 
+    description="The fine-tuned list of cutoff marks for categorical variables. Must match length of the classes minus 1."
   )
 
 class DatasetValidationResult(BaseModel):
@@ -64,5 +74,10 @@ class DatasetValidationResult(BaseModel):
     description="True if the actual metrics are reasonably close to the targets (allowing for small stochastic sampling variance), False if they diverge significantly."
   )
   reasoning: str = Field(
-    description="A concise explanation detailing your evaluation of the dataset vs user expectations."
+    description="A concise explanation detailing your evaluation of the dataset vs user expectations and your suggested adjustments to parameters."
   )
+  adjusted_parameters: Optional[List[FeatureParameterOverride]] = Field(
+    default=None,
+    description="If is_acceptable is False, provide a list of specific parameter additions/modifications. Leave as None if is_acceptable is True."
+  )
+

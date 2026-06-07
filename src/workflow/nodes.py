@@ -1,46 +1,15 @@
 import os
 import json
+import copy
 import numpy as np
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
-from workflow.schema import GraphState, ExtractedDatasetParams, DatasetValidationResult
+from workflow.schema import GraphState, DatasetValidationResult
 from generation.features import generate_clinical_ground_truth, generate_observed_features
 from generation.analysis import run_dataset_diagnostics, run_downstream_probe
 from utils import Config as CoreConfig
-
-def extract_parameters(state: GraphState, config: RunnableConfig) -> dict:
-  """
-    Parses the user's query to retrieve the dataset parameters
-  """
-  print("---> Extracting dataset parameters")
-
-  llm = config["metadata"]["generate_llm"] #type: ignore
-  
-  structured_llm = llm.with_structured_output(ExtractedDatasetParams)
-  
-  prompt = ChatPromptTemplate.from_messages([
-    ("system", (
-      "You are an expert clinical data analyst.\n"
-      "Your task is to examine the user request and extract dataset parameters.\n"
-      "Remember: the prevalence values MUST be converted to floats between 0 and 1.\n"
-      "If a parameter is completely unmentioned, leave it as null."
-    )),
-    ("human", "{query}")
-  ])
-  
-  user_query = state.messages[0].content
-  
-  chain = prompt | structured_llm
-  extracted: ExtractedDatasetParams = chain.invoke({"query": user_query})
-  
-  updates = {}
-  updates["n_samples"] = extracted.n_samples if extracted.n_samples else CoreConfig.N_SAMPLES
-  updates["s_prevalence"] = extracted.s_prevalence if extracted.s_prevalence else CoreConfig.S_PREV
-  updates["y_prevalence"] = extracted.y_prevalence if extracted.y_prevalence else CoreConfig.Y_PREV
-      
-  return updates
 
 def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dict:
   """
@@ -229,8 +198,9 @@ def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:
       "{table_one}\n\n"
       "### Downstream Classifier Performance & Disparities:\n"
       "{probe_results}\n\n"
-      "Carefully analyze if the performance disparities or criteria specified in the user's query match "
-      "the metrics shown above. Allow for slight stochastic variation. Provide your reasoning."
+      "If the targets are NOT met, set is_acceptable to False and provide an optimized copy of the "
+      "feature_map in the 'adjusted_feature_map' field. Adjust the inner parameters (gamma, beta, noise_std) intently "
+      "to shift downstream performance and disparities closer to the user's goals."
     )),
     ("human", "Original User Query / Expectations:\n{query}")
   ])
@@ -247,9 +217,37 @@ def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:
   print(f"     [Evaluation Reasoning]: {result.reasoning}")
   print(f"     [Result Passed]: {result.is_acceptable}")
 
-  next_retry_count = state.retry_count if result.is_acceptable else state.retry_count + 1
-
-  return {
+  updates: dict = {
     "validation_passed": result.is_acceptable,
-    "retry_count": next_retry_count
   }
+    
+  if result.is_acceptable:
+    updates["feature_map"] = state.feature_map
+  else:
+    updates["retry_count"] = state.retry_count + 1
+
+    if result.adjusted_parameters:
+      print(f"     [Optimisation]: Applying {len(result.adjusted_parameters)} fine-tuned overrides directly to feature_map.")
+      
+      updated_map = copy.deepcopy(state.feature_map)
+      
+      for override in result.adjusted_parameters:
+        pathway = override.pathway
+        if pathway in updated_map:
+          for feature in updated_map[pathway]:
+            if feature.get("name") == override.name:
+              if "parameters" not in feature or feature["parameters"] is None:
+                feature["parameters"] = {}
+              
+              if override.gamma is not None:
+                feature["parameters"]["gamma"] = override.gamma
+              if override.beta is not None:
+                feature["parameters"]["beta"] = override.beta
+              if override.noise_std is not None:
+                feature["parameters"]["noise_std"] = override.noise_std
+              if override.absolute_thresholds is not None:
+                feature["parameters"]["absolute_thresholds"] = override.absolute_thresholds
+      
+      updates["feature_map"] = updated_map
+
+  return updates

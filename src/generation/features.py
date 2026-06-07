@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import json
-from typing import cast, Tuple, Dict, Any
+from typing import cast, Tuple, Dict, Any, Optional
 from scipy.special import expit
 from scipy.optimize import bisect
 
@@ -112,17 +112,18 @@ def generate_observed_features(ground_truth_df: pd.DataFrame,
     for feature_spec in feature_list:
       name = feature_spec["name"]
       feat_type = feature_spec.get("type", "").lower()
+      existing_params = feature_spec.get("parameters", None)
       
       if feat_type == "continuous":
         dist = feature_spec.get("dist", "normal")
-        data_array, params = generate_continuous_feat(latent_series, dist, rng)
+        data_array, params = generate_continuous_feat(latent_series, dist, rng, existing_params)
           
       elif feat_type == "binary":
-        data_array, params = generate_binary_feat(latent_series, rng)
+        data_array, params = generate_binary_feat(latent_series, rng, existing_params)
           
       elif feat_type == "categorical":
         n_classes = feature_spec.get("n", 3)
-        data_array, params = generate_categorical_feat(latent_series, n_classes, rng)
+        data_array, params = generate_categorical_feat(latent_series, n_classes, rng, existing_params)
           
       else:
           raise ValueError(f"Unknown or unsupported feature type '{feat_type}' for feature '{name}'")
@@ -135,7 +136,8 @@ def generate_observed_features(ground_truth_df: pd.DataFrame,
 def generate_continuous_feat(
   latent_series: pd.Series, 
   dist_type: str, 
-  rng: np.random.Generator
+  rng: np.random.Generator,
+  existing_params: Optional[dict] = None
   ) -> Tuple[np.ndarray, Dict[str, Any]]:
   """
     Generates a continuous feature driven by a parent latent.
@@ -144,20 +146,26 @@ def generate_continuous_feat(
 
   n_samples = len(latent_series)
 
-  # RANDOM PARAMETERS
-  gamma = float(rng.uniform(0.5, 2.0) * rng.choice([-1, 1]))  # Directional weight
-  beta = float(rng.uniform(-1.0, 1.0))                        # Intercept shift
+  if existing_params and all(k in existing_params for k in ["gamma", "beta", "noise_std"]):
+    gamma = existing_params["gamma"]
+    beta = existing_params["beta"]
+    noise_std = existing_params["noise_std"]
+  else:
+    # RANDOM PARAMETERS
+    gamma = float(rng.uniform(0.5, 2.0) * rng.choice([-1, 1]))  # Directional weight
+    beta = float(rng.uniform(-1.0, 1.0))                        # Intercept shift
+    if dist_type.lower().strip() == "lognormal":
+      noise_std = float(rng.uniform(0.1, 0.4))
+    else:
+      noise_std = float(rng.uniform(0.5, 1.5))
 
   if dist_type.lower().strip() == "lognormal":
-    # RANDOM NOISE PARAM
-    noise_std = float(rng.uniform(0.1, 0.4))
     underlying_normal = gamma * latent_series + beta + rng.normal(0, noise_std, size=n_samples)
     data = np.exp(underlying_normal)
+    dist_type = "lognormal"
     
   else:  # Default to "normal"
-    # RANDOM NOISE PARAM
     dist_type = "normal"
-    noise_std = float(rng.uniform(0.5, 1.5))
     data = gamma * latent_series + beta + rng.normal(0, noise_std, size=n_samples)
 
   params = {
@@ -170,15 +178,19 @@ def generate_continuous_feat(
 
 def generate_binary_feat(
   latent_series: pd.Series, 
-  rng: np.random.Generator
+  rng: np.random.Generator,
+  existing_params: Optional[dict] = None
   ) -> Tuple[np.ndarray, Dict[str, Any]]:
   """
     Generates a binary feature driven by a parent latent.
     Formula: P(X=1) = sigmoid(gamma * Latent + beta)
   """
-  # RANDOM PARAMETERS
-  gamma = float(rng.uniform(0.5, 1.8) * rng.choice([-1, 1]))
-  beta = float(rng.uniform(-0.5, 0.5))
+  if existing_params and all(k in existing_params for k in ["gamma", "beta"]):
+    gamma = existing_params["gamma"]
+    beta = existing_params["beta"]
+  else:
+    gamma = float(rng.uniform(0.5, 1.8) * rng.choice([-1, 1]))
+    beta = float(rng.uniform(-0.5, 0.5))
   
   probabilities = expit(gamma * latent_series + beta)
   data = rng.binomial(n=1, p=probabilities)
@@ -192,28 +204,37 @@ def generate_binary_feat(
 def generate_categorical_feat(
   latent_series: pd.Series, 
   n_classes: int,
-  rng: np.random.Generator
+  rng: np.random.Generator,
+  existing_params: Optional[dict] = None
   ) -> Tuple[np.ndarray, Dict[str, Any]]:
   """
     Generates an ordinal categorical feature using randomized absolute thresholds.
   """
   n_samples = len(latent_series)
-    
-  # RANDOM PARAMETERS
-  gamma = float(rng.uniform(0.6, 1.5) * rng.choice([-1, 1]))
-  noise_std = float(rng.uniform(0.2, 0.5))
 
-  # underlying continuous signal
-  continuous_signal = gamma * latent_series + rng.normal(0, noise_std, size=n_samples)
+  if existing_params and all(k in existing_params for k in ["gamma", "noise_std", "absolute_thresholds"]):
+    gamma = existing_params["gamma"]
+    noise_std = existing_params["noise_std"]
+    thresholds = existing_params["absolute_thresholds"]
 
-  # boundaries for the thresholds
-  low_bound = float(np.quantile(continuous_signal, 0.05))
-  high_bound = float(np.quantile(continuous_signal, 0.95))
+    # underlying continuous signal
+    continuous_signal = gamma * latent_series + rng.normal(0, noise_std, size=n_samples)
+  else: 
+    # RANDOM PARAMETERS
+    gamma = float(rng.uniform(0.6, 1.5) * rng.choice([-1, 1]))
+    noise_std = float(rng.uniform(0.2, 0.5))
 
-  # random thresholds
-  thresholds_raw = rng.uniform(low_bound, high_bound, size=n_classes - 1)
-  thresholds_raw.sort()
-  thresholds = [float(t) for t in thresholds_raw]
+    # underlying continuous signal
+    continuous_signal = gamma * latent_series + rng.normal(0, noise_std, size=n_samples)
+
+    # boundaries for the thresholds
+    low_bound = float(np.quantile(continuous_signal, 0.05))
+    high_bound = float(np.quantile(continuous_signal, 0.95))
+
+    # random thresholds
+    thresholds_raw = rng.uniform(low_bound, high_bound, size=n_classes - 1)
+    thresholds_raw.sort()
+    thresholds = [float(t) for t in thresholds_raw]
 
   data = np.digitize(continuous_signal, thresholds)
 
