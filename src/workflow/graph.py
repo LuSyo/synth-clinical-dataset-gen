@@ -23,7 +23,15 @@ def build_graph():
   workflow.add_edge(START, "generate_ground_truth_data")
   workflow.add_edge("generate_ground_truth_data", "generate_diagnostics")
   workflow.add_edge("generate_diagnostics", "evaluate_downstream_probe")
-  workflow.add_edge("evaluate_downstream_probe", "validate_dataset")
+
+  workflow.add_conditional_edges(
+    "evaluate_downstream_probe", 
+    route_validate,
+    {
+      "save_dataset": "save_dataset",
+      "validate_dataset": "validate_dataset"
+    })
+
   workflow.add_conditional_edges(
     "validate_dataset", 
     route_retry_generation,
@@ -31,9 +39,21 @@ def build_graph():
       "save_dataset": "save_dataset",
       "generate_ground_truth_data": "generate_ground_truth_data"
     })
+
   workflow.add_edge("save_dataset", END)
 
   return workflow.compile()
+
+def route_validate(state: GraphState) -> str:
+  """
+  Conditional router determining whether validation is needed to inform next retries
+  or if max retry count has been reached
+  """
+  if state.retry_count >= state.max_retries:
+    print(f"---> Hard iteration ceiling reached ({state.retry_count}/{state.max_retries}). Stopping loop.")
+    return "save_dataset"
+  else:
+    return "validate_dataset"
 
 def route_retry_generation(state: GraphState) -> str:
   """
@@ -44,9 +64,5 @@ def route_retry_generation(state: GraphState) -> str:
     print("---> Validation Passed! Routing to saving phase.")
     return "save_dataset"
 
-  if state.retry_count > state.max_retries:
-    print(f"---> Validation Failed, but hard iteration ceiling reached ({state.retry_count - 1}/{state.max_retries}). Stopping loop.")
-    return "save_dataset"
-
-  print(f"---> Validation Failed. Iteration budget remaining ({state.retry_count}/{state.max_retries}). Routing back to regenerate data.")
+  print(f"---> Validation Failed. Iteration {state.retry_count} out of {state.max_retries}. Routing back to regenerate data.")
   return "generate_ground_truth_data"

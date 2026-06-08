@@ -10,6 +10,7 @@ from workflow.schema import GraphState, DatasetValidationResult
 from generation.features import FEATURE_FORMULAS_CONTEXT, generate_clinical_ground_truth, generate_observed_features
 from generation.analysis import run_dataset_diagnostics, run_downstream_probe
 from utils import Config as CoreConfig
+from workflow.prompts import PipelinePrompts
 
 def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dict:
   """
@@ -175,22 +176,7 @@ def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:
   structured_llm = llm.with_structured_output(DatasetValidationResult)
 
   prompt = ChatPromptTemplate.from_messages([
-    ("system", (
-      "You are an expert ML and Data Engineer assessing a synthetic dataset generation pipeline.\n"
-      "Your objective is to verify if the generated dataset aligns with the user's approximate target "
-      "predictive performance and group disparities as described in their original query.\n\n"
-      "{formulas_context}\n\n"
-      "# Multi-Trial Parameter Ledger: (Feature Map):\n"
-      "{feature_map}\n\n"
-      "# Latest Trial Dataset Summary (Table One):\n"
-      "{table_one}\n\n"
-      "# Chronological History of Downstream Classifier Performance & Disparities:\n"
-      "{probe_results}\n\n"
-      "Observe how modifying specific gammas, betas, or noise values has shifted performance metrics "
-      "or subgroup disparities so far. Use this trajectory to inform your next tuning decisions.\n\n"
-      "If the targets are NOT met, set is_acceptable to False and provide fine-tuned parameter adjustments "
-      "in the 'adjusted_parameters' block. These adjustments will be applied to trial {next_trial}."
-    )),
+    ("system", PipelinePrompts.DATASET_VALIDATION_PROMPT),
     ("human", "Original User Query / Expectations:\n{query}")
   ])
 
@@ -200,7 +186,7 @@ def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:
     "feature_map": feature_map_str,
     "table_one": table_one_content,
     "probe_results": probe_results_str,
-    "next_trial": next_trial,
+    "current_trial": current_trial,
     "query": user_query
   })
 

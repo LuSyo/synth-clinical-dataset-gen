@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import List, cast
+from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.utils import resample
@@ -180,7 +181,7 @@ def run_downstream_probe(
 
   global_metrics = {"auprc": [], "recall": [], "precision": []}
   subgroup_metrics = {
-      g: {"auprc": [], "recall": [], "precision": []} for g in subgroups
+    g: {"auprc": [], "recall": [], "precision": []} for g in subgroups
   }
 
   n_samples = len(df)
@@ -195,6 +196,11 @@ def run_downstream_probe(
     X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
     y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
     s_test = S.iloc[test_idx]
+
+    # Fit and apply scaler
+    scaler = StandardScaler()
+    X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train), columns=pd.Index(features), index=X_train.index)
+    X_test_scaled = pd.DataFrame(scaler.transform(X_test), columns=pd.Index(features), index=X_test.index)
     
     # Fit probe exactly once per fold
     probe = RandomForestClassifier(
@@ -202,9 +208,9 @@ def run_downstream_probe(
       min_samples_leaf=5,
       random_state=int(rng.integers(0, 100000))
     )
-    probe.fit(X_train, y_train)
+    probe.fit(X_train_scaled, y_train)
 
-    raw_probs = cast(np.ndarray, probe.predict_proba(X_test))
+    raw_probs = cast(np.ndarray, probe.predict_proba(X_test_scaled))
     y_pred_prob = raw_probs[:, 1]
 
     global_threshold = y_test.sum()/len(y_test)
