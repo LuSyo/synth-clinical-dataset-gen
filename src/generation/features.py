@@ -5,6 +5,32 @@ from typing import cast, Tuple, Dict, Any, Optional
 from scipy.special import expit
 from scipy.optimize import bisect
 
+FEATURE_FORMULAS_CONTEXT = """
+  ### Feature Generation Mechanics Context:
+  - Clinical Ground Truth Latents:
+    * H (Central health latent) ~ Gamma(shape=2.0, scale=1.5)
+    * S (Sensitive attribute) ~ Bernoulli(s_prevalence)
+    * U_dep (S-related latent) depends on H and S
+      - If S == 0: latent_link = 0.75, noise_multiplier = 0.2
+      - If S == 1: latent_link = 1.00, noise_multiplier = 3.0
+      - U_dep ~ (latent_link * H) + noise_multiplier * Gamma(shape=1.2, scale=1)
+    * U_indep (S-independent latent) depends on H only: 
+      - U_indep ~ 0.6 * H + Gamma(shape=2.1, scale=1)
+    * Y (Clinical outcome):
+      - Y ~ Bernoulli(sigmoid(beta_0 + 1.5 * normalized(log(U_dep + U_indep))))
+      - Note: beta_0 is calibrated via bisection search to exactly enforce the target y_prevalence.
+  - Pathway Mappings to Latents:
+    * "bio" features descend from latent U_dep
+    * "soc" features descend from latent U_indep
+    * "ind" features descend from latent U_indep
+  - Observed Features (from Feature Map):
+    * Continuous (Normal): X = gamma * Latent + beta + Normal(0, noise_std)
+    * Continuous (Lognormal): X = exp(gamma * Latent + beta + Normal(0, noise_std))
+    * Binary: P(X=1) = sigmoid(gamma * Latent + beta)
+    * Categorical: Digitize an underlying continuous signal [gamma * Latent + Normal(0, noise_std)]
+      - Note: The n-1 class boundaries are calculated between the 5th and 95th percentiles of the continuous signal.
+  """
+
 def generate_clinical_ground_truth(
   n_samples: int, 
   s_prevalence: float, 
@@ -83,7 +109,8 @@ def generate_clinical_ground_truth(
 
 def generate_observed_features(ground_truth_df: pd.DataFrame,
     feature_map: dict,
-    rng: np.random.Generator  
+    rng: np.random.Generator, 
+    trial_index: int = 0
 ) -> Tuple[pd.DataFrame, dict]:
   """
     Generates the set of features from the pre-configured feature map and using the previously generated clinical ground truth
@@ -112,7 +139,8 @@ def generate_observed_features(ground_truth_df: pd.DataFrame,
     for feature_spec in feature_list:
       name = feature_spec["name"]
       feat_type = feature_spec.get("type", "").lower()
-      existing_params = feature_spec.get("parameters", None)
+      trial_key = f"parameters_trial_{trial_index}"
+      existing_params = feature_spec.get(trial_key, None)
       
       if feat_type == "continuous":
         dist = feature_spec.get("dist", "normal")
@@ -129,7 +157,7 @@ def generate_observed_features(ground_truth_df: pd.DataFrame,
           raise ValueError(f"Unknown or unsupported feature type '{feat_type}' for feature '{name}'")
 
       df[name] = data_array
-      feature_spec["parameters"] = params
+      feature_spec[trial_key] = params
               
   return df, enriched_map
 

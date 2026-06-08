@@ -159,7 +159,7 @@ def run_downstream_probe(
   feature_map: dict, 
   output_dir: str,
   rng: np.random.Generator
-  ) -> str:
+  ) -> str | None:
   """
     Trains a RandomForest classifier probe across 4 bootstrap iterations.
     Evaluates predictive performance metrics globally and stratified across S subgroups,
@@ -262,16 +262,9 @@ def run_downstream_probe(
 
   report_df = pd.DataFrame(report_rows)
   markdown_table = report_df.to_markdown(index=False)
-  markdown_report = f"# Downstream Probe Performance Report\n\n{markdown_table}\n"
+  # markdown_report = f"# Downstream Probe Performance Report\n\n{markdown_table}\n"
 
-  os.makedirs(output_dir, exist_ok=True)
-  report_path = os.path.join(output_dir, "probe_results.md")
-  with open(report_path, "w") as f:
-    f.write(markdown_report)
-    
-  print(f"Success! Downstream probe results written to: {report_path}")
-  
-  return markdown_report
+  return markdown_table
 
 # def format_probe_results(results, groups):
 #   columns = [c.removeprefix("u_") for c in results.filter(regex="u_.*").columns]

@@ -7,7 +7,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 from workflow.schema import GraphState, DatasetValidationResult
-from generation.features import generate_clinical_ground_truth, generate_observed_features
+from generation.features import FEATURE_FORMULAS_CONTEXT, generate_clinical_ground_truth, generate_observed_features
 from generation.analysis import run_dataset_diagnostics, run_downstream_probe
 from utils import Config as CoreConfig
 
@@ -21,6 +21,7 @@ def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dic
   n_samples = state.n_samples
   s_prevalence = state.s_prevalence
   y_prevalence = state.y_prevalence
+  feature_map = state.feature_map
 
   metadata = config.get("metadata") or {}
   rng = metadata.get("rng")
@@ -35,12 +36,11 @@ def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dic
     rng=rng
   )
 
-  feature_map = state.feature_map
-
   complete_df, updated_feature_map = generate_observed_features(
     ground_truth_df=ground_truth_df,
     feature_map=feature_map,
-    rng=rng
+    rng=rng,
+    trial_index=state.retry_count
   )
   
   return {
@@ -99,6 +99,7 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
   """
   Workflow evaluation node: Executes the 4-iteration bootstrap classifier 
   probe on the active dataframe to measure baseline performance and disparities.
+  Appends new trial's results to the running probe result string.
   """
   if state.df is None:
     raise ValueError("No dataset found in the graph state to probe. Ensure upstream generation nodes succeeded.")
@@ -113,15 +114,26 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
     
   output_dir = f"{CoreConfig.DATA_DIR}/{exp_name}/{run_name}"
   
-  probe_results = run_downstream_probe(
+  new_probe_results_table = run_downstream_probe(
     df=state.df,
     feature_map=state.feature_map,
     output_dir=output_dir,
     rng=rng
   )
 
+  new_results_str = (f"## Downstream Probe Results: Trial {state.retry_count} \n\n{new_probe_results_table}\n\n")
+
+  accumulated_results = (state.probe_results or "") + new_results_str
+
+  os.makedirs(output_dir, exist_ok=True)
+  report_path = os.path.join(output_dir, "probe_results.md")
+  with open(report_path, "w") as f:
+    f.write(accumulated_results)
+    
+  print(f"Success! Downstream probe results written to: {report_path}")
+
   return {
-    "probe_results": probe_results
+    "probe_results": accumulated_results
   }
 
 def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:
@@ -130,7 +142,9 @@ def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:
   the data summary (Table One), and downstream classifier probe results to validate 
   if the user's expectations and target disparities are satisfied.
   """
-  print("---> Validating generated dataset against user's expectations")
+  current_trial = state.retry_count
+  next_trial = current_trial + 1
+  print(f"---> Validating generated dataset against user's expectations (Trial {current_trial})")
 
   if state.df is None:
     print("Error: No dataset found in state to validate.")
@@ -156,33 +170,7 @@ def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:
 
   # Downstream probe results
   probe_results_str = state.probe_results or "No probe results available."
-
-  formulas_context = """
-  ### Feature Generation Mechanics Context:
-  - Clinical Ground Truth Latents:
-    * H (Central health latent) ~ Gamma(shape=2.0, scale=1.5)
-    * S (Sensitive attribute) ~ Bernoulli(s_prevalence)
-    * U_dep (S-related latent) depends on H and S
-      - If S == 0: latent_link = 0.75, noise_multiplier = 0.2
-      - If S == 1: latent_link = 1.00, noise_multiplier = 3.0
-      - U_dep ~ (latent_link * H) + noise_multiplier * Gamma(shape=1.2, scale=1)
-    * U_indep (S-independent latent) depends on H only: 
-      - U_indep ~ 0.6 * H + Gamma(shape=2.1, scale=1)
-    * Y (Clinical outcome):
-      - Y ~ Bernoulli(sigmoid(beta_0 + 1.5 * normalized(log(U_dep + U_indep))))
-      - Note: beta_0 is calibrated via bisection search to exactly enforce the target y_prevalence.
-  - Pathway Mappings to Latents:
-    * "bio" features descend from latent U_dep
-    * "soc" features descend from latent U_indep
-    * "ind" features descend from latent U_indep
-  - Observed Features (from Feature Map):
-    * Continuous (Normal): X = gamma * Latent + beta + Normal(0, noise_std)
-    * Continuous (Lognormal): X = exp(gamma * Latent + beta + Normal(0, noise_std))
-    * Binary: P(X=1) = sigmoid(gamma * Latent + beta)
-    * Categorical: Digitize an underlying continuous signal [gamma * Latent + Normal(0, noise_std)]
-      - Note: The n-1 class boundaries are calculated between the 5th and 95th percentiles of the continuous signal.
-  """
-
+  
   llm = metadata["validation_llm"]
   structured_llm = llm.with_structured_output(DatasetValidationResult)
 
@@ -192,25 +180,27 @@ def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:
       "Your objective is to verify if the generated dataset aligns with the user's approximate target "
       "predictive performance and group disparities as described in their original query.\n\n"
       "{formulas_context}\n\n"
-      "### Current Feature Configuration (Feature Map):\n"
+      "# Multi-Trial Parameter Ledger: (Feature Map):\n"
       "{feature_map}\n\n"
-      "### Generated Dataset Summary (Table One):\n"
+      "# Latest Trial Dataset Summary (Table One):\n"
       "{table_one}\n\n"
-      "### Downstream Classifier Performance & Disparities:\n"
+      "# Chronological History of Downstream Classifier Performance & Disparities:\n"
       "{probe_results}\n\n"
-      "If the targets are NOT met, set is_acceptable to False and provide an optimized copy of the "
-      "feature_map in the 'adjusted_feature_map' field. Adjust the inner parameters (gamma, beta, noise_std) intently "
-      "to shift downstream performance and disparities closer to the user's goals."
+      "Observe how modifying specific gammas, betas, or noise values has shifted performance metrics "
+      "or subgroup disparities so far. Use this trajectory to inform your next tuning decisions.\n\n"
+      "If the targets are NOT met, set is_acceptable to False and provide fine-tuned parameter adjustments "
+      "in the 'adjusted_parameters' block. These adjustments will be applied to trial {next_trial}."
     )),
     ("human", "Original User Query / Expectations:\n{query}")
   ])
 
   chain = prompt | structured_llm
   result: DatasetValidationResult = chain.invoke({
-    "formulas_context": formulas_context,
+    "formulas_context": FEATURE_FORMULAS_CONTEXT,
     "feature_map": feature_map_str,
     "table_one": table_one_content,
     "probe_results": probe_results_str,
+    "next_trial": next_trial,
     "query": user_query
   })
 
@@ -230,23 +220,30 @@ def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:
       print(f"     [Optimisation]: Applying {len(result.adjusted_parameters)} fine-tuned overrides directly to feature_map.")
       
       updated_map = copy.deepcopy(state.feature_map)
+      current_trial_key = f"parameters_trial_{current_trial}"
+      next_trial_key = f"parameters_trial_{next_trial}"
+
+      for pathway in updated_map:
+          for feature in updated_map[pathway]:
+            if current_trial_key in feature:
+              feature[next_trial_key] = copy.deepcopy(feature[current_trial_key])
       
       for override in result.adjusted_parameters:
         pathway = override.pathway
         if pathway in updated_map:
           for feature in updated_map[pathway]:
             if feature.get("name") == override.name:
-              if "parameters" not in feature or feature["parameters"] is None:
-                feature["parameters"] = {}
+              if next_trial_key not in feature or feature[next_trial_key] is None:
+                  feature[next_trial_key] = {}
               
               if override.gamma is not None:
-                feature["parameters"]["gamma"] = override.gamma
+                feature[next_trial_key]["gamma"] = override.gamma
               if override.beta is not None:
-                feature["parameters"]["beta"] = override.beta
+                feature[next_trial_key]["beta"] = override.beta
               if override.noise_std is not None:
-                feature["parameters"]["noise_std"] = override.noise_std
+                feature[next_trial_key]["noise_std"] = override.noise_std
               if override.absolute_thresholds is not None:
-                feature["parameters"]["absolute_thresholds"] = override.absolute_thresholds
+                feature[next_trial_key]["absolute_thresholds"] = override.absolute_thresholds
       
       updates["feature_map"] = updated_map
 
