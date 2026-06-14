@@ -7,6 +7,7 @@ from workflow.nodes import (
   save_dataset, 
   generate_diagnostics, 
   evaluate_downstream_probe, 
+  sample_dataset,
   validate_dataset
   )
 
@@ -19,6 +20,7 @@ def build_graph():
   workflow.add_node("generate_diagnostics", generate_diagnostics)
   workflow.add_node("evaluate_downstream_probe", evaluate_downstream_probe)
   workflow.add_node("validate_dataset", validate_dataset)
+  workflow.add_node("sample_dataset", sample_dataset)
   workflow.add_node("save_dataset", save_dataset)
 
   # Add edges
@@ -31,7 +33,7 @@ def build_graph():
     "evaluate_downstream_probe", 
     route_validate,
     {
-      "save_dataset": "save_dataset",
+      "sample_dataset": "sample_dataset",
       "validate_dataset": "validate_dataset"
     })
 
@@ -39,10 +41,12 @@ def build_graph():
     "validate_dataset", 
     route_retry_generation,
     {
-      "save_dataset": "save_dataset",
+      "sample_dataset": "sample_dataset",
       "generate_ground_truth_data": "generate_ground_truth_data",
       "apply_bias": "apply_bias"
     })
+
+  workflow.add_edge("sample_dataset", "save_dataset")
 
   workflow.add_edge("save_dataset", END)
 
@@ -55,7 +59,7 @@ def route_validate(state: GraphState) -> str:
   """
   if state.retry_count >= state.max_retries:
     print(f"---> Hard iteration ceiling reached ({state.retry_count}/{state.max_retries}). Stopping loop.")
-    return "save_dataset"
+    return "sample_dataset"
   else:
     return "validate_dataset"
 
@@ -65,8 +69,8 @@ def route_retry_generation(state: GraphState) -> str:
   for another data regeneration step based on validation status and iteration budget.
   """
   if state.validation_passed:
-    print("---> Validation Passed! Routing to saving phase.")
-    return "save_dataset"
+    print("---> Validation Passed! Routing to sampling phase.")
+    return "sample_dataset"
 
   print(f"---> Validation Failed. Iteration {state.retry_count} out of {state.max_retries}. Routing back to regenerate data.")
   return "generate_ground_truth_data"

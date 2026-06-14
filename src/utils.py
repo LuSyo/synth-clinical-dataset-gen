@@ -24,8 +24,12 @@ def parse_args():
 
   parser.add_argument('--max_retries', type=int, default=3)
 
-  parser.add_argument('--n_samples', type=int, default=Config.N_SAMPLES, 
-                      help="Number of individuals to generate in the dataset.")
+  parser.add_argument('--n_pop', type=int, default=Config.N_POP, 
+                      help="Number of individuals to generate in the total population dataset.")
+  parser.add_argument('--n_train', type=int, default=Config.N_TRAIN, 
+                      help="Number of rows to samples for the training set.")
+  parser.add_argument('--n_test', type=int, default=Config.N_TEST, 
+                      help="Number of rows to samples for the test set")
   parser.add_argument('--s_prevalence', type=float, default=Config.S_PREV, 
                       help="Prevalence of the minority group (S=0) expressed as a float between 0 and 1.")
   parser.add_argument('--y_prevalence', type=float, default=Config.Y_PREV, 
@@ -85,6 +89,8 @@ class Config:
 
    SEED = 4
 
-   N_SAMPLES = 20000
+   N_POP = 20000
    Y_PREV = 0.5
    S_PREV = 0.5
+   N_TEST = 1000
+   N_TRAIN = 1000

@@ -197,12 +197,12 @@ def run_downstream_probe(
     g: {"auprc": [], "recall": [], "precision": []} for g in subgroups
   }
 
-  n_samples = len(df)
-  indices = np.arange(n_samples)
+  n_pop = len(df)
+  indices = np.arange(n_pop)
 
   for boot_round in range(4):
     # Bootstrap training sample
-    train_idx = rng.choice(indices, size=n_samples, replace=True)
+    train_idx = rng.choice(indices, size=n_pop, replace=True)
     # OOB test samples 
     test_idx = np.setdiff1d(indices, train_idx)
 
@@ -305,11 +305,11 @@ def run_downstream_probe(
 
 #   return global_results, group_results
 
-# def mutual_info_with_sens(X, Y, target_label, iterations=100, n_samples=None, seed=4):
+# def mutual_info_with_sens(X, Y, target_label, iterations=100, n_pop=None, seed=4):
 #   mi_results = []
 
 #   for i in range(iterations):
-#     X_resampled, Y_resampled = resample(X, Y, replace=False, n_samples=n_samples, random_state=i) # type: ignore
+#     X_resampled, Y_resampled = resample(X, Y, replace=False, n_pop=n_pop, random_state=i) # type: ignore
 #     mi_scores = mutual_info_regression(X_resampled, Y_resampled, n_neighbors=5, random_state=seed)
 #     mi_results.append(mi_scores)
 
@@ -326,7 +326,7 @@ def run_downstream_probe(
 #   plt.xlim(0, 0.5)
 #   plt.show()
 
-# def mutual_info_grouped(df, feature_cols, target_col, target_label, iterations=100, n_samples=None, seed=4):
+# def mutual_info_grouped(df, feature_cols, target_col, target_label, iterations=100, n_pop=None, seed=4):
 #   mi_results = []
 
 #   unique_patients = df['patient_index'].unique()
@@ -336,7 +336,7 @@ def run_downstream_probe(
 #     rng = np.random.default_rng(seed=current_seed)
 
 #     # Patient sampling
-#     sampled_patients = rng.choice(unique_patients, size=n_samples, replace=False)
+#     sampled_patients = rng.choice(unique_patients, size=n_pop, replace=False)
 #     subset_df = df[df['patient_index'].isin(sampled_patients)]
 
 #     # Keep only one random sample per patient

@@ -53,7 +53,7 @@ def main():
 
     initial_state = GraphState(
       messages=[HumanMessage(content=args.query)],
-      n_samples=args.n_samples,
+      n_pop=args.n_pop,
       s_prevalence=args.s_prevalence,
       y_prevalence=args.y_prevalence,
       feature_map=feature_map,

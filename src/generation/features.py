@@ -36,7 +36,7 @@ FEATURE_FORMULAS_CONTEXT = """
   """
 
 def generate_clinical_ground_truth(
-  n_samples: int, 
+  n_pop: int, 
   s_prevalence: float, 
   y_prevalence: float, 
   rng: np.random.Generator
@@ -50,13 +50,13 @@ def generate_clinical_ground_truth(
   U_indep -> Y
 
   Inputs:
-    - n_samples (int): size of the population
+    - n_pop (int): size of the population
     - s_prevalence (float, [0, 1]): prevalence of the majority group of the sensitive attribute S in the population
     - y_prevalence (float, [0, 1]): prevalence of the clinical outcome Y in the population
     - seed (int): random seed for reproducibility
 
   Outputs:
-    - DataFrame with n_samples rows and the columns:
+    - DataFrame with n_pop rows and the columns:
       - H: central health latent 
       - S: binary sensitive attribute
       - U_dep: Latent descending from H, directly influenced by S
@@ -65,18 +65,18 @@ def generate_clinical_ground_truth(
     
   # Central health latent H (Independent Gamma distribution)
   h_shape, h_scale = 2.0, 1.5
-  H = rng.gamma(shape=h_shape, scale=h_scale, size=n_samples)
+  H = rng.gamma(shape=h_shape, scale=h_scale, size=n_pop)
   
   # Binary Sensitive attribute S (Bernoulli/Binomial distribution)
-  S = rng.binomial(n=1, p=s_prevalence, size=n_samples)
+  S = rng.binomial(n=1, p=s_prevalence, size=n_pop)
   
   # Latent U_indep (Descends from H, independent of S)
-  U_indep = 0.6 * H + rng.gamma(shape=2.1, scale=1, size=n_samples)
+  U_indep = 0.6 * H + rng.gamma(shape=2.1, scale=1, size=n_pop)
   
   # Latent U_dep (Descends from H, directly influenced by S)
   latent_link = np.where(S == 0, 0.75, 1.0)
   multiplier = np.where(S == 0, 0.2, 3.0)
-  U_dep = (latent_link * H) + multiplier * rng.gamma(shape=1.2, scale=1, size=n_samples)
+  U_dep = (latent_link * H) + multiplier * rng.gamma(shape=1.2, scale=1, size=n_pop)
   
   # Outcome
   structural_signal = np.log(U_dep + U_indep)
@@ -175,11 +175,11 @@ def generate_continuous_feat(
     Generates a continuous feature driven by a parent latent.
     Formula: X = gamma * Latent + beta + noise
   """
-  n_samples = len(latent_series)
+  n_pop = len(latent_series)
 
   # Standardise the latent
   ranks = rankdata(latent_series)
-  percentiles = (ranks - 0.5) / n_samples
+  percentiles = (ranks - 0.5) / n_pop
   perfect_normal_latent = norm.ppf(percentiles)
 
   latent_mean = float(latent_series.mean())
@@ -202,13 +202,13 @@ def generate_continuous_feat(
   if dist_type.lower().strip() == "lognormal":
     gamma_sign = np.sign(gamma) if gamma != 0 else 1.0
     gamma_magnitude = abs(gamma)
-    unscaled_lognormal = np.exp(gamma_sign * perfect_normal_latent + rng.normal(0, noise_std, size=n_samples))
+    unscaled_lognormal = np.exp(gamma_sign * perfect_normal_latent + rng.normal(0, noise_std, size=n_pop))
     data = (gamma_magnitude * unscaled_lognormal) + beta
     dist_type = "lognormal"
     
   else:  # Default to "normal"
     dist_type = "normal"
-    data = gamma * perfect_normal_latent + beta + rng.normal(0, noise_std, size=n_samples)
+    data = gamma * perfect_normal_latent + beta + rng.normal(0, noise_std, size=n_pop)
 
   params = {
     "gamma": gamma,
@@ -252,7 +252,7 @@ def generate_categorical_feat(
   """
     Generates an ordinal categorical feature using randomized absolute thresholds.
   """
-  n_samples = len(latent_series)
+  n_pop = len(latent_series)
 
   if existing_params and all(k in existing_params for k in ["gamma", "noise_std", "absolute_thresholds"]):
     gamma = existing_params["gamma"]
@@ -260,14 +260,14 @@ def generate_categorical_feat(
     thresholds = existing_params["absolute_thresholds"]
 
     # underlying continuous signal
-    continuous_signal = gamma * latent_series + rng.normal(0, noise_std, size=n_samples)
+    continuous_signal = gamma * latent_series + rng.normal(0, noise_std, size=n_pop)
   else: 
     # RANDOM PARAMETERS
     gamma = float(rng.uniform(0.6, 1.5) * rng.choice([-1, 1]))
     noise_std = float(rng.uniform(0.2, 0.5))
 
     # underlying continuous signal
-    continuous_signal = gamma * latent_series + rng.normal(0, noise_std, size=n_samples)
+    continuous_signal = gamma * latent_series + rng.normal(0, noise_std, size=n_pop)
 
     # boundaries for the thresholds
     low_bound = float(np.quantile(continuous_signal, 0.05))

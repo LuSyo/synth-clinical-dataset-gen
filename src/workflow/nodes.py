@@ -10,6 +10,7 @@ from workflow.schema import GraphState, DatasetValidationResult
 from generation.features import FEATURE_FORMULAS_CONTEXT, generate_clinical_ground_truth, generate_observed_features
 from generation.bias import BIAS_FORMULAS_CONTEXT, apply_feature_bias
 from generation.analysis import run_dataset_diagnostics, run_downstream_probe
+from generation.processing import stratified_sampling
 from utils import Config as CoreConfig
 from workflow.prompts import PipelinePrompts
 
@@ -20,7 +21,7 @@ def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dic
   print("---> Generating clinical ground truth and observed features")
   
   # Retrieve parameters from the state
-  n_samples = state.n_samples
+  n_pop = state.n_pop
   s_prevalence = state.s_prevalence
   y_prevalence = state.y_prevalence
   feature_map = state.feature_map
@@ -32,7 +33,7 @@ def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dic
     rng = np.random.default_rng(seed=state.seed)
   
   ground_truth_df = generate_clinical_ground_truth(
-    n_samples=n_samples,
+    n_pop=n_pop,
     s_prevalence=s_prevalence,
     y_prevalence=y_prevalence,
     rng=rng
@@ -87,10 +88,21 @@ def save_dataset(state: GraphState, config: RunnableConfig) -> dict:
   output_dir = f"{CoreConfig.DATA_DIR}/{exp_name}/{run_name}"
   os.makedirs(output_dir, exist_ok=True)
 
-  # Save dataset
-  dataset_output_path = os.path.join(output_dir, "clinical_ground_truth.csv")
-  state.df.to_csv(dataset_output_path, index=False)
-  print(f"Success! Saved dataset ({len(state.df)} rows) to: {dataset_output_path}")
+  # Save population dataset
+  if state.df is not None:
+    pop_path = os.path.join(output_dir, "population.csv")
+    state.df.to_csv(pop_path, index=False)
+    print(f"  [Artifact Saved] Total Population -> {pop_path}")
+
+  if state.train_df is not None:
+    train_path = os.path.join(output_dir, "train.csv")
+    state.train_df.to_csv(train_path, index=False)
+    print(f"  [Artifact Saved] Training Set    -> {train_path}")
+
+  if state.test_df is not None:
+    test_path = os.path.join(output_dir, "test.csv")
+    state.test_df.to_csv(test_path, index=False)
+    print(f"  [Artifact Saved] Testing Set     -> {test_path}")
 
   # Save feature map
   map_output_path = os.path.join(output_dir, "feature_map.json")
@@ -98,10 +110,7 @@ def save_dataset(state: GraphState, config: RunnableConfig) -> dict:
     json.dump(state.feature_map, f, indent=2)
   print(f"Success! Saved feature map to: {map_output_path}")
   
-  return {
-    "dataset_path": dataset_output_path,
-    "df": None
-  }
+  return {}
 
 def generate_diagnostics(state: GraphState, config: RunnableConfig) -> dict:
   print("---> Generating Dataset Diagnostics & Visualizations")
@@ -160,6 +169,40 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
 
   return {
     "probe_results": accumulated_results
+  }
+
+def sample_dataset(state: GraphState, config: RunnableConfig) -> dict:
+  """
+  Workflow node: Extracts runtime arguments from configuration and samples
+  mutually exclusive training and testing splits from the main population.
+  """
+  print("---> Splitting population into training and testing subsets")
+
+  if state.df is None:
+    raise ValueError("No active dataframe found in the graph state to apply bias. Ensure upstream generation succeeded.")
+
+  metadata = config.get("metadata") or {}
+  rng = metadata.get("rng")
+  if rng is None:
+    print("Warning: No active RNG stream found in RunnableConfig. Instantiating fallback stream.")
+    rng = np.random.default_rng(seed=state.seed)
+  
+  n_train = metadata.get("n_train", CoreConfig.N_TRAIN)
+  n_test = metadata.get("n_test", CoreConfig.N_TEST)
+
+  strata_columns = ['S']
+
+  train_df, test_df = stratified_sampling(
+    df=state.df,
+    strata=strata_columns,
+    n_train=n_train,
+    n_test=n_test,
+    rng=rng
+  )
+
+  return {
+    "train_df": train_df,
+    "test_df": test_df
   }
 
 def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:

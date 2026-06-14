@@ -11,13 +11,15 @@ class GraphState(BaseModel):
   messages: Annotated[List[BaseMessage], add_messages] = Field(default_factory=list)
   
   # Dataset Parameters (Target values requested by user)
-  n_samples: int = Field(default=20000, description="Number of individual records to generate.")
+  n_pop: int = Field(default=20000, description="Number of individual records to generate.")
   s_prevalence: float = Field(default=0.5, description="Prevalence of the minority group (S=0).")
   y_prevalence: float = Field(default=0.5, description="Prevalence of the positive outcome (Y=1).")
   feature_map: dict = Field(default_factory=dict, description="JSON map specifying names, types, and causal pathways.")
   
   # Dataset
   df: Optional[pd.DataFrame] = Field(default=None, description="In-memory tabular dataset object.")
+  train_df: Optional[pd.DataFrame] = None
+  test_df: Optional[pd.DataFrame] = None
 
   # Dataset downstream impact
   probe_results: Optional[str] = Field(default=None, description="Predictive performance metrics of a downstream classifier trained on the generated dataset.")
@@ -42,7 +44,7 @@ class GraphState(BaseModel):
 
   def __repr__(self):
     return (f"GraphState(messages_count={len(self.messages)}, "
-            f"targets=[N={self.n_samples}, S_prev={self.s_prevalence}, Y_prev={self.y_prevalence}], "
+            f"targets=[N={self.n_pop}, S_prev={self.s_prevalence}, Y_prev={self.y_prevalence}], "
             f"valid={self.validation_passed})")
 
 class FeatureParameterOverride(BaseModel):
