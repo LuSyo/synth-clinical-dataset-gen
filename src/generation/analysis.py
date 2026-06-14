@@ -121,6 +121,13 @@ def run_dataset_diagnostics(df: pd.DataFrame, feature_map: dict, output_dir: str
         else:
           categorical_features.append(feature['name'])
 
+      obs_name = feature.get('observed_feature')
+      if obs_name and obs_name in df.columns:
+        if feature['type'].lower().strip() == "continuous":
+          continuous_features.append(obs_name)
+        else:
+          categorical_features.append(obs_name)
+
   for feature in continuous_features:
     plot_cont_feature(
       df=df, feature=feature, label=f"Feature {feature}",
@@ -171,10 +178,16 @@ def run_downstream_probe(
   S = df['S']
   subgroups = sorted(S.unique().astype(int))
 
-  x_ind = [f['name'] for f in feature_map.get('ind', [])]
-  x_bio = [f['name'] for f in feature_map.get('bio', [])]
-  x_soc = [f['name'] for f in feature_map.get('soc', [])]
-  features = [col for col in df.columns if col in x_ind + x_bio + x_soc]
+  features = []
+  for pathway in ['ind', 'bio', 'soc']:
+    for f in feature_map.get(pathway, []):
+      base_name = f['name']
+      obs_name = f.get('observed_feature')
+      
+      if obs_name and obs_name in df.columns:
+        features.append(obs_name)
+      elif base_name in df.columns:
+        features.append(base_name)
 
   X = df[features]
   y = df['Y']

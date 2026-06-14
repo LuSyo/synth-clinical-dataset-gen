@@ -4,6 +4,7 @@ import json
 from typing import cast, Tuple, Dict, Any, Optional
 from scipy.special import expit
 from scipy.optimize import bisect
+from scipy.stats import rankdata, norm
 
 FEATURE_FORMULAS_CONTEXT = """
   ### Feature Generation Mechanics Context:
@@ -23,9 +24,12 @@ FEATURE_FORMULAS_CONTEXT = """
     * "bio" features descend from latent U_dep
     * "soc" features descend from latent U_indep
     * "ind" features descend from latent U_indep
-  - Observed Features (from Feature Map):
-    * Continuous (Normal): X = gamma * Latent + beta + Normal(0, noise_std)
-    * Continuous (Lognormal): X = exp(gamma * Latent + beta + Normal(0, noise_std))
+  - Baseline True Features (from Feature Map):
+    * Continuous: 
+      - All incoming parent latents are standard-normalized (Mean=0, SD=1) 
+      - Normal: X = gamma * Normalized_Latent + beta + Normal(0, noise_std)
+      - Lognormal: X = abs(gamma) * exp(sign(gamma) * Normalized_Latent + Normal(0, noise_std)) + beta
+      - Note: The directional sign of gamma controls direct vs inverse latent correlation, while the absolute magnitude of gamma acts linear scale multiplier
     * Binary: P(X=1) = sigmoid(gamma * Latent + beta)
     * Categorical: Digitize an underlying continuous signal [gamma * Latent + Normal(0, noise_std)]
       - Note: The n-1 class boundaries are calculated between the 5th and 95th percentiles of the continuous signal.
@@ -39,11 +43,11 @@ def generate_clinical_ground_truth(
 ) -> pd.DataFrame:
   """
   Generates the latent health state of the population, underlying cause of the outcome, as per the following SCM: 
-  H -> U_corr
-  H -> U_desc
-  S -> U_corr
-  U_corr -> Y
-  U_desc -> Y
+  H -> U_dep
+  H -> U_indep
+  S -> U_dep
+  U_dep -> Y
+  U_indep -> Y
 
   Inputs:
     - n_samples (int): size of the population
@@ -171,8 +175,16 @@ def generate_continuous_feat(
     Generates a continuous feature driven by a parent latent.
     Formula: X = gamma * Latent + beta + noise
   """
-
   n_samples = len(latent_series)
+
+  # Standardise the latent
+  ranks = rankdata(latent_series)
+  percentiles = (ranks - 0.5) / n_samples
+  perfect_normal_latent = norm.ppf(percentiles)
+
+  latent_mean = float(latent_series.mean())
+  latent_std = float(latent_series.std()) if latent_series.std() > 0 else 1.0
+  norm_latent = (latent_series - latent_mean) / latent_std
 
   if existing_params and all(k in existing_params for k in ["gamma", "beta", "noise_std"]):
     gamma = existing_params["gamma"]
@@ -188,13 +200,15 @@ def generate_continuous_feat(
       noise_std = float(rng.uniform(0.5, 1.5))
 
   if dist_type.lower().strip() == "lognormal":
-    underlying_normal = gamma * latent_series + beta + rng.normal(0, noise_std, size=n_samples)
-    data = np.exp(underlying_normal)
+    gamma_sign = np.sign(gamma) if gamma != 0 else 1.0
+    gamma_magnitude = abs(gamma)
+    unscaled_lognormal = np.exp(gamma_sign * perfect_normal_latent + rng.normal(0, noise_std, size=n_samples))
+    data = (gamma_magnitude * unscaled_lognormal) + beta
     dist_type = "lognormal"
     
   else:  # Default to "normal"
     dist_type = "normal"
-    data = gamma * latent_series + beta + rng.normal(0, noise_std, size=n_samples)
+    data = gamma * perfect_normal_latent + beta + rng.normal(0, noise_std, size=n_samples)
 
   params = {
     "gamma": gamma,

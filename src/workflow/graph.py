@@ -3,6 +3,7 @@ from langgraph.graph import StateGraph, END, START
 from workflow.schema import GraphState
 from workflow.nodes import (
   generate_ground_truth_data, 
+  apply_bias,
   save_dataset, 
   generate_diagnostics, 
   evaluate_downstream_probe, 
@@ -14,6 +15,7 @@ def build_graph():
 
   # Add nodes
   workflow.add_node("generate_ground_truth_data", generate_ground_truth_data)
+  workflow.add_node("apply_bias", apply_bias)
   workflow.add_node("generate_diagnostics", generate_diagnostics)
   workflow.add_node("evaluate_downstream_probe", evaluate_downstream_probe)
   workflow.add_node("validate_dataset", validate_dataset)
@@ -21,7 +23,8 @@ def build_graph():
 
   # Add edges
   workflow.add_edge(START, "generate_ground_truth_data")
-  workflow.add_edge("generate_ground_truth_data", "generate_diagnostics")
+  workflow.add_edge("generate_ground_truth_data", "apply_bias")
+  workflow.add_edge("apply_bias", "generate_diagnostics")
   workflow.add_edge("generate_diagnostics", "evaluate_downstream_probe")
 
   workflow.add_conditional_edges(
@@ -37,7 +40,8 @@ def build_graph():
     route_retry_generation,
     {
       "save_dataset": "save_dataset",
-      "generate_ground_truth_data": "generate_ground_truth_data"
+      "generate_ground_truth_data": "generate_ground_truth_data",
+      "apply_bias": "apply_bias"
     })
 
   workflow.add_edge("save_dataset", END)

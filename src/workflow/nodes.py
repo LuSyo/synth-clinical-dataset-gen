@@ -8,6 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 from workflow.schema import GraphState, DatasetValidationResult
 from generation.features import FEATURE_FORMULAS_CONTEXT, generate_clinical_ground_truth, generate_observed_features
+from generation.bias import BIAS_FORMULAS_CONTEXT, apply_feature_bias
 from generation.analysis import run_dataset_diagnostics, run_downstream_probe
 from utils import Config as CoreConfig
 from workflow.prompts import PipelinePrompts
@@ -46,6 +47,30 @@ def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dic
   
   return {
     "df": complete_df,
+    "feature_map": updated_feature_map
+  }
+
+def apply_bias(state: GraphState, config: RunnableConfig) -> dict:
+  print("---> Applying bias to the soc pathway")
+
+  if state.df is None:
+    raise ValueError("No active dataframe found in the graph state to apply bias. Ensure upstream generation succeeded.")
+
+  metadata = config.get("metadata") or {}
+  rng = metadata.get("rng")
+  if rng is None:
+    print("Warning: No active RNG stream found in RunnableConfig. Instantiating fallback stream.")
+    rng = np.random.default_rng(seed=state.seed)
+
+  biased_df, updated_feature_map = apply_feature_bias(
+    df=state.df,
+    feature_map=state.feature_map,
+    trial_index=state.retry_count,
+    rng=rng
+  )
+
+  return {
+    "df": biased_df,
     "feature_map": updated_feature_map
   }
 
@@ -183,6 +208,7 @@ def validate_dataset(state: GraphState, config: RunnableConfig) -> dict:
   chain = prompt | structured_llm
   result: DatasetValidationResult = chain.invoke({
     "formulas_context": FEATURE_FORMULAS_CONTEXT,
+    "bias_context": BIAS_FORMULAS_CONTEXT,
     "feature_map": feature_map_str,
     "table_one": table_one_content,
     "probe_results": probe_results_str,

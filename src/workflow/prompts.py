@@ -3,7 +3,8 @@ class PipelinePrompts:
   DATASET_VALIDATION_PROMPT = (
     "You are an expert ML and Data Engineer assessing a synthetic dataset generation pipeline.\n"
     "Your objective is to verify if the generated dataset aligns with the user's approximate target predictive performance and group disparities as described in their original query.\n\n"
-    "{formulas_context}\n\n"
+    "{formulas_context}\n"
+    "{bias_context}\n\n"
     "# Multi-Trial Parameter Ledger: (Feature Map):\n"
     "{feature_map}\n\n"
     "# Latest Trial Dataset Summary (Table One):\n"
