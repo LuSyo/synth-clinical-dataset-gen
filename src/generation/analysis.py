@@ -165,7 +165,8 @@ def run_dataset_diagnostics(df: pd.DataFrame, feature_map: dict, output_dir: str
 def run_downstream_probe(
   df: pd.DataFrame, 
   feature_map: dict, 
-  output_dir: str,
+  n_train: int,
+  n_test: int,
   rng: np.random.Generator
   ) -> str | None:
   """
@@ -202,9 +203,11 @@ def run_downstream_probe(
 
   for boot_round in range(4):
     # Bootstrap training sample
-    train_idx = rng.choice(indices, size=n_pop, replace=True)
+    train_idx = rng.choice(indices, size=n_train, replace=True)
     # OOB test samples 
-    test_idx = np.setdiff1d(indices, train_idx)
+    oob_idx = np.setdiff1d(indices, train_idx)
+    test_size = min(len(oob_idx), n_test)
+    test_idx = rng.choice(oob_idx, size=test_size, replace=False)
 
     X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
     y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]

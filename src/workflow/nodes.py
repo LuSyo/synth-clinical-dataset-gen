@@ -148,11 +148,15 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
     rng = np.random.default_rng(seed=state.seed)
     
   output_dir = f"{CoreConfig.DATA_DIR}/{exp_name}/{run_name}"
+
+  n_train = metadata.get("n_train", CoreConfig.N_TRAIN)
+  n_test = metadata.get("n_test", CoreConfig.N_TEST)
   
   new_probe_results_table = run_downstream_probe(
     df=state.df,
     feature_map=state.feature_map,
-    output_dir=output_dir,
+    n_test=n_test,
+    n_train=n_train,
     rng=rng
   )
 
