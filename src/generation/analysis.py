@@ -3,12 +3,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from typing import List, cast
+from typing import List, cast, Tuple
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.feature_selection import mutual_info_regression
-from sklearn.utils import resample
-from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import average_precision_score, recall_score, precision_score
 from tableone import TableOne
 
@@ -78,18 +75,18 @@ def plot_cat_feature(
   plt.savefig(os.path.join(plots_dir, f"hist_{feature}.png"))
   plt.close()
 
-def generate_table_one(
+def create_table_one(
   df: pd.DataFrame, 
   groupby: str,
   output_dir: str,
-  continuous: List[str] = [],
-  categorical: List[str] = []
+  feature_map: dict
   ):
+  continuous_features, categorical_features = get_feat_lists(df, feature_map)
 
   table1 = TableOne(df,
                   groupby=groupby,
-                  continuous= continuous,
-                  categorical=categorical,
+                  continuous= continuous_features,
+                  categorical=categorical_features,
                   missing=False,
                   sort=True
                   )
@@ -100,17 +97,7 @@ def generate_table_one(
   with open(report_path, "w") as f:
     f.write(formatted_table1)
 
-def run_dataset_diagnostics(df: pd.DataFrame, feature_map: dict, output_dir: str):
-  latents = ["H", "U_dep", "U_indep"]
-
-  for L in latents:
-    if L in df.columns:
-      plot_cont_feature(
-        df=df, feature=L, label=f"Latent {L}",
-        hue_1="Y", hue_2="S",
-        output_dir=output_dir
-      )
-
+def get_feat_lists(df: pd.DataFrame, feature_map: dict) -> Tuple[List, List]:
   continuous_features = []
   categorical_features = []
   for pathway, feature_list in feature_map.items():
@@ -127,6 +114,21 @@ def run_dataset_diagnostics(df: pd.DataFrame, feature_map: dict, output_dir: str
           continuous_features.append(obs_name)
         else:
           categorical_features.append(obs_name)
+
+  return continuous_features, categorical_features
+
+def plot_dataset(df: pd.DataFrame, feature_map: dict, output_dir: str):
+  latents = ["H", "U_dep", "U_indep"]
+
+  for L in latents:
+    if L in df.columns:
+      plot_cont_feature(
+        df=df, feature=L, label=f"Latent {L}",
+        hue_1="Y", hue_2="S",
+        output_dir=output_dir
+      )
+
+  continuous_features, categorical_features = get_feat_lists(df, feature_map)
 
   for feature in continuous_features:
     plot_cont_feature(
@@ -154,19 +156,13 @@ def run_dataset_diagnostics(df: pd.DataFrame, feature_map: dict, output_dir: str
     hue_1="Y",
     output_dir=output_dir
   )
-
-  generate_table_one(
-    df=df, groupby="S",
-    output_dir=output_dir,
-    continuous=latents + continuous_features,
-    categorical=["Y"] + categorical_features 
-  )
   
 def run_downstream_probe(
   df: pd.DataFrame, 
   feature_map: dict, 
   n_train: int,
   n_test: int,
+  current_phase: str,
   rng: np.random.Generator
   ) -> str | None:
   """
@@ -185,7 +181,7 @@ def run_downstream_probe(
       base_name = f['name']
       obs_name = f.get('observed_feature')
       
-      if obs_name and obs_name in df.columns:
+      if current_phase != "generation" and obs_name and obs_name in df.columns:
         features.append(obs_name)
       elif base_name in df.columns:
         features.append(base_name)

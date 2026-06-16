@@ -40,24 +40,54 @@ The synthetic population generation is governed by a defined Structural Causal M
 The pipeline processes tasks through a deterministic, sequential state machine graph controlled via an orchestration layout:
 
 ```
-      ┌──────────────────────────────────────────────┐
-  [ START ]                                          │
-      │                                              │
-      ▼                                              │
-[Generate clinical ground truth and features]        │
-      │                                              │
-      ▼                                              │
-[Generate plots and data summary]                    │
-      │                                              │
-      ▼                                              │
-[Run downstream classifier probe]                    │
-      │                                              │
-      ▼                                              │
-[LLM: Evaluate results against target]               │
-      │                                              │
-      ├───(Validation Failed)───► [LLM: Adapt parameters]
-      │
-      └───(Validation Passed)───► [Save dataset] ───► [END]
+[ Start ]
+    │
+    ▼
+┌──────────────────────────────┐
+│ 1. Generate ground truth     │ ◄───────────────────────────┐
+└──────────────┬───────────────┘                             │
+               │                                             │ (Loop Phase 1:
+               ▼                                             │  Tune Raw Gen)
+┌─────────────────────────────────────────┐                  │
+│ 2. Classifier probe on raw features     │                  │
+└──────────────┬──────────────────────────┘                  │
+               │                                             │
+               ▼                                             │
+      /─────────────────\                                    │
+     < Valid Raw Targets? > ───[ No: Update Gen Params ] ────┘
+      \─────────────────/
+               │
+               │ Yes (Lock Baseline)
+               ▼
+┌──────────────────────────────┐ 
+│ 3. Apply bias on X_soc       │ ◄───────────────────────────┐
+└──────────────┬───────────────┘                             │
+               │                                             │ (Loop Phase 2:
+               ▼                                             │  Tune Bias Only)
+┌─────────────────────────────────────────┐                  │
+│ 4. Classifier probe on biased features  │                  │
+└──────────────┬──────────────────────────┘                  │
+               │                                             │
+               ▼                                             │
+      /──────────────────\                                   │
+     < Valid Bias Targets? > ───[ No: Update Bias Params ] ──┘
+      \──────────────────/
+               │
+               │ Yes (Lock Final Artifacts)
+               ▼
+┌──────────────────────────────┐
+│ 5. Compile Reports           │  (Table One & Histograms)
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│ 6. S-stratified sampling     │  (Train / Test Splits)
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│ 7. Save datasets             │
+└──────────────────────────────┘
 ```
 
 ## Configuration and schema usage

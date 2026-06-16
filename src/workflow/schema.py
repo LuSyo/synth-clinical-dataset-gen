@@ -27,6 +27,7 @@ class GraphState(BaseModel):
   # Pipeline Artifact Tracking
   dataset_path: Optional[str] = Field(default=None, description="Local path to the currently generated CSV dataset.")
   
+  phase: str = Field(default="generation", description="The current phase of the flow (generation, bias, complete)")
   validation_passed: bool = Field(default=False, description="Whether the generated dataset successfully met all acceptance criteria.")
   retry_count: int = Field(
     default=0, 
@@ -36,11 +37,6 @@ class GraphState(BaseModel):
     default=3, 
     description="The upper boundary ceiling to prevent infinite looping."
   )
-  # validation_status: Literal["valid", "retry_extraction", "generation_failure", "pending"] = Field(
-  #   default="pending", 
-  #   description="The resulting status from the dataset evaluation node."
-  # )
-  
 
   def __repr__(self):
     return (f"GraphState(messages_count={len(self.messages)}, "
@@ -71,15 +67,35 @@ class FeatureParameterOverride(BaseModel):
     description="The fine-tuned list of cutoff marks for categorical variables. Must match length of the classes minus 1."
   )
 
-class DatasetValidationResult(BaseModel):
+class MeasurementErrorParams(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+  mu_bias: float = Field(description="Systematic calibration mean shift delta.")
+  noise_std: float = Field(description="Random noise standard deviation.")
+
+class AccessBarrierParams(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+  alpha: float = Field(description="Multiplicative attenuation factor bounded strictly within (0, 1).")
+  noise_std: float = Field(description="Random noise standard deviation.")
+
+class ReferralBiasParams(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+  p_suppress: float = Field(description="Stochastic probability of a true 1 being overridden to an observed 0, bounded within (0, 1).")
+
+class UnderClassificationParams(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+  p_down: float = Field(description="Stochastic probability of dropping down exactly 1 severity tier, bounded within (0, 1).")
+
+class ValidationResult(BaseModel):
   is_acceptable: bool = Field(
     description="True if the actual metrics are reasonably close to the targets (allowing for small stochastic sampling variance), False if they diverge significantly."
   )
   reasoning: str = Field(
     description="A concise explanation detailing your evaluation of the dataset vs user expectations and your suggested adjustments to parameters."
   )
+
+class DatasetValidationResult(ValidationResult):
   adjusted_parameters: Optional[List[FeatureParameterOverride]] = Field(
     default=None,
-    description="If is_acceptable is False, provide a list of specific parameter additions/modifications. Leave as None if is_acceptable is True."
+    description="If is_acceptable is False, provide a list of specific feature parameter additions/modifications. Leave as None if is_acceptable is True."
   )
 

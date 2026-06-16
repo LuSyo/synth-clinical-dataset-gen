@@ -11,13 +11,13 @@ BIAS_FORMULAS_CONTEXT = """
 
     1. type: "measurement_error" (Continuous features / additive bias)
       - Corrupts target group entries via a systematic mean shift and heteroscedastic noise.
-      - Equation: X_obs = X_true + mu_bias + Normal(0, sigma_bias)
-      - Parameters: mu_bias (directional shift), sigma_bias (noise expansion).
+      - Equation: X_obs = X_true + mu_bias + Normal(0, noise_std)
+      - Parameters: mu_bias (directional shift), noise_std (noise standard deviation).
 
     2. type: "access_barrier" (Continuous features / acuity-based attenuation)
       - Attenuates mild/stable measurements for patients with limited clinical access.
       - Equation: If X_true < tau (empirical median): X_obs = X_true * alpha + Normal(0, noise_std)
-      - Parameters: alpha (multiplicative attenuation factor where closer to 0 is more severe suppression).
+      - Parameters: alpha (multiplicative attenuation factor where closer to 0 is more severe suppression), noise_std (noise standard deviation).
 
     3. type: "referral_bias" (Binary features / asymmetric entry suppression)
       - Systematically suppresses positive clinical recommendations or track entries for qualified patients.
