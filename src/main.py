@@ -56,6 +56,7 @@ def main():
       n_pop=args.n_pop,
       s_prevalence=args.s_prevalence,
       y_prevalence=args.y_prevalence,
+      diff_y_prev_factor=args.diff_y_prev_factor,
       feature_map=feature_map,
       max_retries=args.max_retries,
       seed=args.seed

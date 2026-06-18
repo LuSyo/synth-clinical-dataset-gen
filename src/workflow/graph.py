@@ -33,7 +33,14 @@ def build_graph():
   workflow.add_edge(START, "generate_ground_truth_data")
   workflow.add_edge("generate_ground_truth_data", "generate_table_one_1")
   workflow.add_edge("generate_table_one_1", "evaluate_downstream_probe_1")
-  workflow.add_edge("evaluate_downstream_probe_1", "validate_raw_dataset")
+
+  workflow.add_conditional_edges(
+    "evaluate_downstream_probe_1", 
+    route_validate,
+    {
+      "skip": "apply_bias",
+      "validate": "validate_raw_dataset"
+    })
 
   workflow.add_conditional_edges(
     "validate_raw_dataset", 
@@ -50,8 +57,8 @@ def build_graph():
     "evaluate_downstream_probe_2", 
     route_validate,
     {
-      "sample_dataset": "sample_dataset",
-      "validate_biased_dataset": "validate_biased_dataset"
+      "skip": "sample_dataset",
+      "validate": "validate_biased_dataset"
     })
     
   workflow.add_conditional_edges(
@@ -75,9 +82,9 @@ def route_validate(state: GraphState) -> str:
   """
   if state.retry_count >= state.max_retries:
     print(f"---> Hard iteration ceiling reached ({state.retry_count}/{state.max_retries}). Stopping loop.")
-    return "sample_dataset"
+    return "skip"
   else:
-    return "validate_biased_dataset"
+    return "validate"
 
 def route_retry_generation(state: GraphState) -> str:
   """

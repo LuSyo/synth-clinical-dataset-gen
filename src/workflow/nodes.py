@@ -24,6 +24,7 @@ def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dic
   n_pop = state.n_pop
   s_prevalence = state.s_prevalence
   y_prevalence = state.y_prevalence
+  diff_y_prev_factor = state.diff_y_prev_factor
   feature_map = state.feature_map
 
   metadata = config.get("metadata") or {}
@@ -36,6 +37,7 @@ def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dic
     n_pop=n_pop,
     s_prevalence=s_prevalence,
     y_prevalence=y_prevalence,
+    diff_y_prev_factor=diff_y_prev_factor,
     rng=rng
   )
 

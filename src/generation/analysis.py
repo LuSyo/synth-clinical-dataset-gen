@@ -86,7 +86,7 @@ def create_table_one(
   table1 = TableOne(df,
                   groupby=groupby,
                   continuous= continuous_features,
-                  categorical=categorical_features,
+                  categorical=categorical_features + ["Y"],
                   missing=False,
                   sort=True
                   )

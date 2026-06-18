@@ -14,6 +14,7 @@ class GraphState(BaseModel):
   n_pop: int = Field(default=20000, description="Number of individual records to generate.")
   s_prevalence: float = Field(default=0.5, description="Prevalence of the minority group (S=0).")
   y_prevalence: float = Field(default=0.5, description="Prevalence of the positive outcome (Y=1).")
+  diff_y_prev_factor: float = Field(default=1, description="Differential prevalence of the positive outcome (Y=1) between groups in the raw dataset.")
   feature_map: dict = Field(default_factory=dict, description="JSON map specifying names, types, and causal pathways.")
   
   # Dataset

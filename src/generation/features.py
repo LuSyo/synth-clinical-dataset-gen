@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import json
+import math
 from typing import cast, Tuple, Dict, Any, Optional
 from scipy.special import expit
 from scipy.optimize import bisect
@@ -39,6 +40,7 @@ def generate_clinical_ground_truth(
   n_pop: int, 
   s_prevalence: float, 
   y_prevalence: float, 
+  diff_y_prev_factor: float,
   rng: np.random.Generator
 ) -> pd.DataFrame:
   """
@@ -68,15 +70,22 @@ def generate_clinical_ground_truth(
   H = rng.gamma(shape=h_shape, scale=h_scale, size=n_pop)
   
   # Binary Sensitive attribute S (Bernoulli/Binomial distribution)
-  S = rng.binomial(n=1, p=s_prevalence, size=n_pop)
+  n_1 = math.floor(s_prevalence*n_pop)
+  n_0 = n_pop - n_1
+  S_1 = np.ones(shape=n_1, dtype=int)
+  S_0 = np.zeros(shape=n_0, dtype=int)
+  S = np.concat((S_1, S_0))
+  rng.shuffle(S)
   
   # Latent U_indep (Descends from H, independent of S)
   U_indep = 0.6 * H + rng.gamma(shape=2.1, scale=1, size=n_pop)
   
   # Latent U_dep (Descends from H, directly influenced by S)
-  latent_link = np.where(S == 0, 0.75, 1.0)
-  multiplier = np.where(S == 0, 0.2, 3.0)
-  U_dep = (latent_link * H) + multiplier * rng.gamma(shape=1.2, scale=1, size=n_pop)
+  min_multiplier = 1
+  maj_multiplier = 1 + (diff_y_prev_factor - 1) / 0.35
+  
+  multiplier = np.where(S == 0, min_multiplier, maj_multiplier)
+  U_dep = H + multiplier * rng.gamma(shape=1.2, scale=1, size=n_pop)
   
   # Outcome
   structural_signal = np.log(U_dep + U_indep)

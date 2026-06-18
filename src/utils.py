@@ -34,6 +34,8 @@ def parse_args():
                       help="Prevalence of the minority group (S=0) expressed as a float between 0 and 1.")
   parser.add_argument('--y_prevalence', type=float, default=Config.Y_PREV, 
                       help="Prevalence of the positive clinical outcome (Y=1) expressed as a float between 0 and 1.")
+  parser.add_argument('--diff_y_prev_factor', type=float, default=1, 
+                      help="Differential prevalence of the positive clinical outcome (Y=1) between groups (group 1 / group 0) expressed as a float.")
 
   return parser.parse_args()
 
