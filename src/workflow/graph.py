@@ -80,7 +80,10 @@ def route_validate(state: GraphState) -> str:
   Conditional router determining whether validation is needed to inform next retries
   or if max retry count has been reached
   """
-  if state.retry_count >= state.max_retries:
+  if state.phase == "generation" and state.retry_count >= state.max_retries // 2:
+    print("---> Skipping validation: Saving retries budget for bias application.")
+    return "skip"
+  elif state.retry_count >= state.max_retries:
     print(f"---> Hard iteration ceiling reached ({state.retry_count}/{state.max_retries}). Stopping loop.")
     return "skip"
   else:
@@ -93,10 +96,6 @@ def route_retry_generation(state: GraphState) -> str:
   """
   if state.validation_passed:
     print("---> Validation Passed! Routing to bias application.")
-    return "apply_bias"
-
-  if state.retry_count >= state.max_retries // 2:
-    print("---> Validation Failed. Saving retries budget for bias application.")
     return "apply_bias"
 
   print(f"---> Validation Failed. Iteration {state.retry_count} out of {state.max_retries}. Routing back to regenerate data.")

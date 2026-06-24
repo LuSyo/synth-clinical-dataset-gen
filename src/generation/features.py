@@ -82,7 +82,7 @@ def generate_clinical_ground_truth(
   
   # Latent U_dep (Descends from H, directly influenced by S)
   min_multiplier = 1
-  maj_multiplier = 1 + (diff_y_prev_factor - 1) / 0.35
+  maj_multiplier = diff_y_prev_factor / 0.75 + min_multiplier
   
   multiplier = np.where(S == 0, min_multiplier, maj_multiplier)
   U_dep = H + multiplier * rng.gamma(shape=1.2, scale=1, size=n_pop)

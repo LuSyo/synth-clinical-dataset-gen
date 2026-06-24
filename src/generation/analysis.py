@@ -91,7 +91,7 @@ def create_table_one(
                   sort=True
                   )
 
-  formatted_table1 = table1.tabulate(tablefmt = "fancy_grid")
+  formatted_table1 = table1.tabulate(tablefmt = "github")
 
   report_path = os.path.join(output_dir, "table_one.txt")
   with open(report_path, "w") as f:

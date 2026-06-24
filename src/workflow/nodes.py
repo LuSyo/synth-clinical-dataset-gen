@@ -74,7 +74,8 @@ def apply_bias(state: GraphState, config: RunnableConfig) -> dict:
 
   return {
     "df": biased_df,
-    "feature_map": updated_feature_map
+    "feature_map": updated_feature_map,
+    "phase": "bias"
   }
 
 def save_dataset(state: GraphState, config: RunnableConfig) -> dict:
@@ -291,7 +292,6 @@ def validate_raw_dataset(state: GraphState, config: RunnableConfig) -> dict:
     
   if result.is_acceptable:
     updates["feature_map"] = state.feature_map
-    updates["phase"] = "bias"
   else:
     updates["retry_count"] = state.retry_count + 1
 
@@ -452,7 +452,6 @@ def validate_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
           
           for b_key, b_val in emitted_overrides[f_name].items():
             feature[next_trial_key]["bias_params"][b_key] = b_val
-            print(f"         -> [{f_name}][{next_trial_key}] Set bias_params['{b_key}'] = {b_val}")
 
     updates["feature_map"] = updated_map
 
