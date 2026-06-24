@@ -41,10 +41,9 @@ def main():
   # Set up the RunnableConfig
   validation_llm = ChatOpenAI(
     model="gpt-4o-mini", 
-    model_kwargs={
-      "temperature": 0,
-      "seed": args.seed
-    })
+    temperature = 0,
+    seed = args.seed)
+    
   config = RunnableConfig(metadata={
     "validation_llm": validation_llm,
     "exp_name": args.exp_name,
@@ -62,6 +61,7 @@ def main():
       y_prevalence=args.y_prevalence,
       diff_y_prev_factor=args.diff_y_prev_factor,
       target_raw_auprc=args.target_raw_auprc,
+      target_disp=args.target_disp,
       target_biased_recall_disp=args.target_biased_recall_disp,
       target_biased_ppv_disp=args.target_biased_ppv_disp,
       disparity_tolerance=args.disparity_tolerance,

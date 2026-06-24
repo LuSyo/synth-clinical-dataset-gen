@@ -4,6 +4,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 import pandas as pd
 from utils import Config
+from enums import TargetDisp
 
 class GraphState(BaseModel):
   model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -21,6 +22,10 @@ class GraphState(BaseModel):
   target_raw_auprc: float = Field(
     default=Config.TARGET_AUPRC, 
     description="Minimum acceptable global AUPRC baseline for the raw dataset probe."
+  )
+  target_disp: TargetDisp = Field(
+    default=TargetDisp.none,
+    description="Active target disparities (none, both, recall, ppv)"
   )
   target_biased_recall_disp: float = Field(
     default=Config.TARGET_RECALL_DISP, 

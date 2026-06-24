@@ -7,6 +7,7 @@ import os
 import logging
 import sys
 import json
+from enums import TargetDisp
 
 def parse_args():
   date_str = datetime.datetime.now().strftime('%Y-%m-%d')
@@ -35,6 +36,8 @@ def parse_args():
   parser.add_argument('--diff_y_prev_factor', type=float, default=1, 
                       help="Differential prevalence of the positive clinical outcome (Y=1) between groups (group 1 / group 0) expressed as a float.")
 
+  parser.add_argument('--target_disp', type=TargetDisp, default=TargetDisp.none, 
+                      help="Active target disparities (none, both, recall, ppv).")
   parser.add_argument('--target_raw_auprc', type=float, default=0.4, 
                       help="Minimum acceptable global AUPRC baseline for the raw dataset probe.")
   parser.add_argument('--target_biased_recall_disp', type=float, default=0.0, 

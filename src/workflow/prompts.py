@@ -37,18 +37,9 @@ class PipelinePrompts:
     "You are an expert AI Fairwashing and Bias Simulation Engineer assessing a synthetic data degradation pipeline.\n"
     "Your SOLE objective is to tune post-generation sociological bias parameters to hit specific operational disparity scales.\n\n"
     
-    "MATHEMATICAL TARGETS & TOLERANCES:\n"
-    "- Target Recall Disparity (Recall(S=1) - Recall(S=0)): between {lower_recall_disp} and {higher_recall_disp}\n"
-    "- Target Precision/PPV Disparity (Precision(S=1) - Precision(S=0)): between {lower_ppv_disp} and {higher_ppv_disp}\n\n"
-    
-    "CRITICAL PRINCIPLE:\n"
-    "You are evaluating the DIFFERENCE between the Majority Group (S=1) and Minority Group (S=0).\n"
-    "Calculate the observed metrics from the latest trial:\n"
-    "  Observed Recall Disparity = Recall(S=1) - Recall(S=0)\n"
-    "  Observed Precision Disparity = Precision(S=1) - Precision(S=0)\n\n"
-    
-    "EVALUATION RULE:\n"
-    "If an observed disparity falls outside the target window [Target - Tolerance, Target + Tolerance], it FAILS validation.\n\n"
+    "MATHEMATICAL TARGETS:\n"
+    "- Target Recall Disparity (Recall(S=1) - Recall(S=0)): {recall_disp_target_str}\n"
+    "- Target Precision/PPV Disparity (Precision(S=1) - Precision(S=0)): {ppv_disp_target_str}\n\n"
 
     "CRITICAL WARNING: Completely ignore the AUPRC values."
 
@@ -74,5 +65,5 @@ class PipelinePrompts:
     "   - Early/Mid Trials: If the biased disparity gap is weak, aggressively strengthen bias values (e.g., lower alpha closer to 0, increase p_suppress or p_down closer to 1.0).\n"
     "   - Final Trials: Apply fine adjustments to stabilize metrics without breaking the classifier entirely.\n\n"
     
-    "If the observed disparities are within the acceptable tolerance windows, set is_acceptable to True. Otherwise, set is_acceptable to False and emit fine-tuned parameter adjustments exclusively for keys inside the 'bias_params' sub-blocks of 'soc' features"
+    "If the observed disparities are within the acceptable windows, set is_acceptable to True. Otherwise, set is_acceptable to False and emit fine-tuned parameter adjustments exclusively for keys inside the 'bias_params' sub-blocks of 'soc' features"
   )

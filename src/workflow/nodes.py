@@ -6,6 +6,7 @@ from typing import Optional
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
 from pydantic import create_model, ConfigDict
+from enums import TargetDisp
 from workflow.schema import AccessBarrierParams, GraphState, DatasetValidationResult, ValidationResult, MeasurementErrorParams, ReferralBiasParams, UnderClassificationParams
 from generation.features import FEATURE_FORMULAS_CONTEXT, generate_clinical_ground_truth, generate_observed_features
 from generation.bias import BIAS_FORMULAS_CONTEXT, apply_feature_bias
@@ -339,6 +340,24 @@ def validate_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
     print("Error: No dataset found in state to validate.")
     return {"validation_passed": False}
 
+  # SET DISPAIRITY TARGETS. SKIP VALIDATION IF NONE.
+  
+  if state.target_disp == TargetDisp.none:
+    return {}
+  
+  recall_disp_target_str = "No specific target"
+  ppv_disp_target_str = "No specific target"
+
+  if state.target_disp == TargetDisp.both or state.target_disp == TargetDisp.recall:
+    lower_recall_disp = round(state.target_biased_recall_disp - state.disparity_tolerance, 3)
+    higher_recall_disp = round(state.target_biased_recall_disp + state.disparity_tolerance, 3)
+    recall_disp_target_str = f"between {lower_recall_disp} and {higher_recall_disp}"
+
+  if state.target_disp == TargetDisp.both or state.target_disp == TargetDisp.ppv:
+    lower_ppv_disp = round(state.target_biased_ppv_disp - state.disparity_tolerance, 3)
+    higher_ppv_disp = round(state.target_biased_ppv_disp + state.disparity_tolerance, 3)
+    ppv_disp_target_str = f"between {lower_ppv_disp} and {higher_ppv_disp}"
+
   # ======= Generate the schema ============
   BIAS_TYPE_MAP = {
     "measurement_error": MeasurementErrorParams,
@@ -398,13 +417,6 @@ def validate_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
     ("human", "Evaluate the dataset.")
   ])
 
-  # Calculate the acceptable disaprity intervals
-  lower_recall_disp = round(state.target_biased_recall_disp - state.disparity_tolerance, 3)
-  higher_recall_disp = round(state.target_biased_recall_disp + state.disparity_tolerance, 3)
-  lower_ppv_disp = round(state.target_biased_ppv_disp - state.disparity_tolerance, 3)
-  higher_ppv_disp = round(state.target_biased_ppv_disp + state.disparity_tolerance, 3)
-
-
   chain = prompt | structured_llm
   result = chain.invoke({
     "formulas_context": FEATURE_FORMULAS_CONTEXT,
@@ -413,14 +425,12 @@ def validate_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
     "table_one": table_one_content,
     "probe_results": probe_results_str,
     "current_trial": current_trial,
-    "lower_recall_disp": lower_recall_disp,
-    "higher_recall_disp": higher_recall_disp,
-    "lower_ppv_disp": lower_ppv_disp,
-    "higher_ppv_disp": higher_ppv_disp,
+    "recall_disp_target_str": recall_disp_target_str,
+    "ppv_disp_target_str": ppv_disp_target_str
   })
 
-  print(f"     [Biased dataset validation result]: {result.is_acceptable}")
-  print(f"     [Evaluation Reasoning]: {result.reasoning}")
+  print(f"[Biased dataset validation result]: {result.is_acceptable}")
+  print(f"[Evaluation Reasoning]: {result.reasoning}")
 
   updates: dict = {
     "validation_passed": result.is_acceptable,
@@ -441,7 +451,7 @@ def validate_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
         feature[next_trial_key] = copy.deepcopy(feature[current_trial_key])
 
     if result.adjusted_parameters and "soc" in updated_map:
-      print(f"       [Optimization]: Applying fine-tuned overrides to feature_map bias blocks.")
+      print(f"[Optimization]: Applying fine-tuned overrides to feature_map bias blocks.")
 
       emitted_overrides = result.adjusted_parameters.model_dump(exclude_none=True)
 
