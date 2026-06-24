@@ -3,19 +3,37 @@ from typing import List, Annotated, Optional, Literal
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 import pandas as pd
+from utils import Config
 
 class GraphState(BaseModel):
   model_config = ConfigDict(arbitrary_types_allowed=True)
 
   seed: int = Field(default=4)
-  messages: Annotated[List[BaseMessage], add_messages] = Field(default_factory=list)
+  # messages: Annotated[List[BaseMessage], add_messages] = Field(default_factory=list)
   
   # Dataset Parameters (Target values requested by user)
-  n_pop: int = Field(default=20000, description="Number of individual records to generate.")
-  s_prevalence: float = Field(default=0.5, description="Prevalence of the minority group (S=0).")
-  y_prevalence: float = Field(default=0.5, description="Prevalence of the positive outcome (Y=1).")
+  n_pop: int = Field(default=Config.N_POP, description="Number of individual records to generate.")
+  s_prevalence: float = Field(default=Config.S_PREV, description="Prevalence of the minority group (S=0).")
+  y_prevalence: float = Field(default=Config.Y_PREV, description="Prevalence of the positive outcome (Y=1).")
   diff_y_prev_factor: float = Field(default=1, description="Differential prevalence of the positive outcome (Y=1) between groups in the raw dataset.")
   feature_map: dict = Field(default_factory=dict, description="JSON map specifying names, types, and causal pathways.")
+
+  target_raw_auprc: float = Field(
+    default=Config.TARGET_AUPRC, 
+    description="Minimum acceptable global AUPRC baseline for the raw dataset probe."
+  )
+  target_biased_recall_disp: float = Field(
+    default=Config.TARGET_RECALL_DISP, 
+    description="Target Recall disparity, calculated as: Recall(S=1) - Recall(S=0). Default is 0.0 (parity)."
+  )
+  target_biased_ppv_disp: float = Field(
+    default=Config.TARGET_PPV_DISP, 
+    description="Target Precision/PPV disparity, calculated as: Precision(S=1) - Precision(S=0). Default is 0.0 (parity)."
+  )
+  disparity_tolerance: float = Field(
+    default=Config.DISP_TOLERANCE,
+    description="The acceptable error margin (+/-) allowed around the target disparity values."
+  )
   
   # Dataset
   df: Optional[pd.DataFrame] = Field(default=None, description="In-memory tabular dataset object.")
@@ -40,7 +58,7 @@ class GraphState(BaseModel):
   )
 
   def __repr__(self):
-    return (f"GraphState(messages_count={len(self.messages)}, "
+    return (
             f"targets=[N={self.n_pop}, S_prev={self.s_prevalence}, Y_prev={self.y_prevalence}], "
             f"valid={self.validation_passed})")
 

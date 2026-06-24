@@ -18,8 +18,6 @@ def parse_args():
   parser.add_argument('--exp_name', type=str, default=date_str)
   parser.add_argument('--run_name', type=str, default=date_str)
 
-  parser.add_argument('--query', type=str, required=True)
-  
   parser.add_argument('--mapping', type=str, required=True)
 
   parser.add_argument('--max_retries', type=int, default=3)
@@ -36,6 +34,15 @@ def parse_args():
                       help="Prevalence of the positive clinical outcome (Y=1) expressed as a float between 0 and 1.")
   parser.add_argument('--diff_y_prev_factor', type=float, default=1, 
                       help="Differential prevalence of the positive clinical outcome (Y=1) between groups (group 1 / group 0) expressed as a float.")
+
+  parser.add_argument('--target_raw_auprc', type=float, default=0.4, 
+                      help="Minimum acceptable global AUPRC baseline for the raw dataset probe.")
+  parser.add_argument('--target_biased_recall_disp', type=float, default=0.0, 
+                      help="Target Recall disparity, calculated as: Recall(S=1) - Recall(S=0). Default is 0.0 (parity).")
+  parser.add_argument('--target_biased_ppv_disp', type=float, default=0.0, 
+                      help="Target Precision/PPV disparity, calculated as: Precision(S=1) - Precision(S=0). Default is 0.0 (parity).")
+  parser.add_argument('--disparity_tolerance', type=float, default=0.03, 
+                      help="The acceptable error margin (+/-) allowed around the target disparity values.")
 
   return parser.parse_args()
 
@@ -80,19 +87,24 @@ def set_global_seeds(seed):
   # torch.cuda.manual_seed_all(seed)
 
 class Config:
-   DATA_DIR = './data'
-   SOURCES_DIR = './data/sources'
-   LOG_DIR = './logs'
-   RESULTS_DIR = './results'
-   EVAL_DIR = './data/eval'
+  DATA_DIR = './data'
+  SOURCES_DIR = './data/sources'
+  LOG_DIR = './logs'
+  RESULTS_DIR = './results'
+  EVAL_DIR = './data/eval'
 
-   MLFLOW_TRACKING_URI = "sqlite:///mlflow.db"
-   # mlflow ui --backend-store-uri sqlite:///mlflow.db to see results
+  MLFLOW_TRACKING_URI = "sqlite:///mlflow.db"
+  # mlflow ui --backend-store-uri sqlite:///mlflow.db to see results
 
-   SEED = 4
+  SEED = 4
 
-   N_POP = 20000
-   Y_PREV = 0.5
-   S_PREV = 0.5
-   N_TEST = 1000
-   N_TRAIN = 1000
+  N_POP = 20000
+  Y_PREV = 0.5
+  S_PREV = 0.5
+  N_TEST = 1000
+  N_TRAIN = 1000
+
+  TARGET_AUPRC = 0.4
+  TARGET_RECALL_DISP = 0.0
+  TARGET_PPV_DISP = 0.0
+  DISP_TOLERANCE = 0.03

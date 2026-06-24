@@ -39,7 +39,12 @@ def main():
   app = build_graph()
 
   # Set up the RunnableConfig
-  validation_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, seed=args.seed)
+  validation_llm = ChatOpenAI(
+    model="gpt-4o-mini", 
+    model_kwargs={
+      "temperature": 0,
+      "seed": args.seed
+    })
   config = RunnableConfig(metadata={
     "validation_llm": validation_llm,
     "exp_name": args.exp_name,
@@ -52,17 +57,18 @@ def main():
     mlflow.log_params(vars(args))
 
     initial_state = GraphState(
-      messages=[HumanMessage(content=args.query)],
       n_pop=args.n_pop,
       s_prevalence=args.s_prevalence,
       y_prevalence=args.y_prevalence,
       diff_y_prev_factor=args.diff_y_prev_factor,
+      target_raw_auprc=args.target_raw_auprc,
+      target_biased_recall_disp=args.target_biased_recall_disp,
+      target_biased_ppv_disp=args.target_biased_ppv_disp,
+      disparity_tolerance=args.disparity_tolerance,
       feature_map=feature_map,
       max_retries=args.max_retries,
       seed=args.seed
     )
-
-    logger.info(f"QUERY: {args.query}")
 
     app.invoke(initial_state, config)
 

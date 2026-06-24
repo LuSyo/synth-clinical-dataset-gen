@@ -164,7 +164,7 @@ def run_downstream_probe(
   n_test: int,
   current_phase: str,
   rng: np.random.Generator
-  ) -> str | None:
+  ) -> Tuple[str | None, float, float]:
   """
     Trains a RandomForest classifier probe across 4 bootstrap iterations.
     Evaluates predictive performance metrics globally and stratified across S subgroups,
@@ -258,6 +258,11 @@ def run_downstream_probe(
     arr = np.array(vals)
     return f"{np.nanmean(arr):.3f} &plusmn; {np.nanstd(arr):.3f}"
 
+  def disp(vals_1, vals_0):
+    arr_1 = np.array(vals_1)
+    arr_0 = np.array(vals_0)
+    return round(float(np.nanmean(arr_1) - np.nanmean(arr_0)), 3)
+
   report_rows = []
 
   # Global results
@@ -278,11 +283,13 @@ def run_downstream_probe(
       "Precision (mean &plusmn; sd)": fmt(subgroup_metrics[g]['precision'])
     })
 
+  recall_disparity = disp(subgroup_metrics[1]['recall'], subgroup_metrics[0]['recall'])
+  precision_disparity = disp(subgroup_metrics[1]['precision'], subgroup_metrics[0]['precision'])
+
   report_df = pd.DataFrame(report_rows)
   markdown_table = report_df.to_markdown(index=False)
-  # markdown_report = f"# Downstream Probe Performance Report\n\n{markdown_table}\n"
 
-  return markdown_table
+  return markdown_table, recall_disparity, precision_disparity
 
 # def format_probe_results(results, groups):
 #   columns = [c.removeprefix("u_") for c in results.filter(regex="u_.*").columns]

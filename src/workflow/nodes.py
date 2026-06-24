@@ -171,7 +171,7 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
   n_train = metadata.get("n_train", CoreConfig.N_TRAIN)
   n_test = metadata.get("n_test", CoreConfig.N_TEST)
   
-  new_probe_results_table = run_downstream_probe(
+  new_probe_results_table, recall_disp, precision_disp = run_downstream_probe(
     df=state.df,
     feature_map=state.feature_map,
     n_test=n_test,
@@ -181,7 +181,7 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
   )
 
   heading_insert = "(Raw Baseline Features)" if state.phase == "generation" else "(Biased Observed Features)"
-  new_results_str = (f"## Downstream Probe Results {heading_insert}: Trial {state.retry_count} \n\n{new_probe_results_table}\n\n")
+  new_results_str = (f"## Downstream Probe Results {heading_insert}: Trial {state.retry_count} \n\n{new_probe_results_table}\n\nRecall Disparity (Recall(S=1) - Recall(S=0)): {recall_disp}\nPrecision/PPV Disparity (Precision(S=1) - Precision(S=0)): {precision_disp}\n\n")
 
   accumulated_results = (state.probe_results or "") + new_results_str
 
@@ -256,9 +256,6 @@ def validate_raw_dataset(state: GraphState, config: RunnableConfig) -> dict:
     with open(table_one_path, "r") as f:
       table_one_content = f.read()
 
-  # User expectations
-  user_query = state.messages[0].content
-
   # Feature map, including feature parameters
   feature_map_str = json.dumps(state.feature_map, indent=2)
 
@@ -270,7 +267,7 @@ def validate_raw_dataset(state: GraphState, config: RunnableConfig) -> dict:
 
   prompt = ChatPromptTemplate.from_messages([
     ("system", PipelinePrompts.RAW_DATA_VALIDATION_PROMPT),
-    ("human", "Original User Query / Expectations:\n{query}")
+    ("human", "Evaluate the dataset.")
   ])
 
   chain = prompt | structured_llm
@@ -280,11 +277,11 @@ def validate_raw_dataset(state: GraphState, config: RunnableConfig) -> dict:
     "table_one": table_one_content,
     "probe_results": probe_results_str,
     "current_trial": current_trial,
-    "query": user_query
+    "target_raw_auprc": state.target_raw_auprc
   })
 
-  print(f"     [Raw dataset validation result]: {result.is_acceptable}")
-  print(f"     [Evaluation Reasoning]: {result.reasoning}")
+  print(f"[Raw dataset validation result]: {result.is_acceptable}")
+  print(f"[Evaluation Reasoning]: {result.reasoning}")
 
   updates: dict = {
     "validation_passed": result.is_acceptable,
@@ -296,7 +293,7 @@ def validate_raw_dataset(state: GraphState, config: RunnableConfig) -> dict:
     updates["retry_count"] = state.retry_count + 1
 
     if result.adjusted_parameters:
-      print(f"     [Optimisation]: Applying {len(result.adjusted_parameters)} fine-tuned overrides directly to feature_map.")
+      print(f"[Optimisation]: Applying {len(result.adjusted_parameters)} fine-tuned overrides directly to feature_map.")
       
       updated_map = copy.deepcopy(state.feature_map)
       current_trial_key = f"parameters_trial_{current_trial}"
@@ -387,9 +384,6 @@ def validate_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
     with open(table_one_path, "r") as f:
       table_one_content = f.read()
 
-  # User expectations
-  user_query = state.messages[0].content
-
   # Feature map, including feature parameters
   feature_map_str = json.dumps(state.feature_map, indent=2)
 
@@ -401,8 +395,15 @@ def validate_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
 
   prompt = ChatPromptTemplate.from_messages([
     ("system", PipelinePrompts.BIASED_DATA_VALIDATION_PROMPT),
-    ("human", "Original User Query / Expectations:\n{query}")
+    ("human", "Evaluate the dataset.")
   ])
+
+  # Calculate the acceptable disaprity intervals
+  lower_recall_disp = round(state.target_biased_recall_disp - state.disparity_tolerance, 3)
+  higher_recall_disp = round(state.target_biased_recall_disp + state.disparity_tolerance, 3)
+  lower_ppv_disp = round(state.target_biased_ppv_disp - state.disparity_tolerance, 3)
+  higher_ppv_disp = round(state.target_biased_ppv_disp + state.disparity_tolerance, 3)
+
 
   chain = prompt | structured_llm
   result = chain.invoke({
@@ -412,7 +413,10 @@ def validate_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
     "table_one": table_one_content,
     "probe_results": probe_results_str,
     "current_trial": current_trial,
-    "query": user_query
+    "lower_recall_disp": lower_recall_disp,
+    "higher_recall_disp": higher_recall_disp,
+    "lower_ppv_disp": lower_ppv_disp,
+    "higher_ppv_disp": higher_ppv_disp,
   })
 
   print(f"     [Biased dataset validation result]: {result.is_acceptable}")
