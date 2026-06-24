@@ -225,7 +225,7 @@ def run_downstream_probe(
     raw_probs = cast(np.ndarray, probe.predict_proba(X_test_scaled))
     y_pred_prob = raw_probs[:, 1]
 
-    global_threshold = y_test.sum()/len(y_test)
+    global_threshold = y_train.sum()/len(y_train)
     y_pred = (y_pred_prob > global_threshold).astype(int)
     global_metrics["auprc"].append(average_precision_score(y_test, y_pred_prob))
     global_metrics["recall"].append(recall_score(y_test, y_pred))
@@ -240,8 +240,7 @@ def run_downstream_probe(
       y_test_sub = y_test[subgroup_mask]
       y_pred_prob_sub = y_pred_prob[subgroup_mask] 
 
-      subgroup_threshold = y_test_sub.sum()/len(y_test_sub)
-      y_pred_sub = (y_pred_prob_sub > subgroup_threshold).astype(int)
+      y_pred_sub = (y_pred_prob_sub > global_threshold).astype(int)
 
       if y_test_sub.sum() > 0:
         subgroup_metrics[g]["auprc"].append(average_precision_score(y_test_sub, y_pred_prob_sub))  
