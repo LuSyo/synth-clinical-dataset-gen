@@ -41,8 +41,11 @@ def generate_clinical_ground_truth(
   s_prevalence: float, 
   y_prevalence: float, 
   diff_y_prev_factor: float,
-  rng: np.random.Generator
-) -> pd.DataFrame:
+  rng: np.random.Generator,
+  h_dim: int = 3,
+  u_dep_dim: int = 2,
+  u_indep_dim: int = 2,
+) -> dict:
   """
   Generates the latent health state of the population, underlying cause of the outcome, as per the following SCM: 
   H -> U_dep
@@ -65,10 +68,6 @@ def generate_clinical_ground_truth(
       - U_indep: Latent descending from H, independent of S
   """
     
-  # Central health latent H (Independent Gamma distribution)
-  h_shape, h_scale = 2.0, 1.5
-  H = rng.gamma(shape=h_shape, scale=h_scale, size=n_pop)
-  
   # Binary Sensitive attribute S (Bernoulli/Binomial distribution)
   n_1 = math.floor(s_prevalence*n_pop)
   n_0 = n_pop - n_1
@@ -77,18 +76,27 @@ def generate_clinical_ground_truth(
   S = np.concat((S_1, S_0))
   rng.shuffle(S)
   
+  # Central health latent H (Independent Gamma distribution matrix)
+  h_shape, h_scale = 2.0, 1.5
+  H = rng.gamma(shape=h_shape, scale=h_scale, size=(n_pop, h_dim))
+  
   # Latent U_indep (Descends from H, independent of S)
-  U_indep = 0.6 * H + rng.gamma(shape=2.1, scale=1, size=n_pop)
+  W_indep = rng.uniform(0.4, 0.8, size=((h_dim, u_indep_dim)))
+  H_proj_indep = np.dot(H, W_indep)
+  U_indep = H_proj_indep + rng.gamma(shape=2.1, scale=1, size=(n_pop, u_indep_dim))
   
   # Latent U_dep (Descends from H, directly influenced by S)
+  W_dep = rng.uniform(0.4, 0.8, size=((h_dim, u_dep_dim)))
+  H_proj_dep = np.dot(H, W_dep)
+
   min_multiplier = 1
   maj_multiplier = diff_y_prev_factor / 0.75 + min_multiplier
-  
-  multiplier = np.where(S == 0, min_multiplier, maj_multiplier)
-  U_dep = H + multiplier * rng.gamma(shape=1.2, scale=1, size=n_pop)
+  multiplier = np.where(S == 0, min_multiplier, maj_multiplier).reshape(-1, 1)
+
+  U_dep = H_proj_dep + multiplier * rng.gamma(shape=1.2, scale=1, size=(n_pop, u_dep_dim))
   
   # Outcome
-  structural_signal = np.log(U_dep + U_indep)
+  structural_signal = np.log(U_dep.mean(axis=1) + U_indep.mean(axis=1))
   structural_signal_normed = (structural_signal - structural_signal.mean())/structural_signal.std()
 
   # irreducible noise
@@ -109,18 +117,15 @@ def generate_clinical_ground_truth(
   # stochastic sampling of the true outcome
   Y = rng.binomial(n=1, p=Y_prob)
   
-  # Create the DataFrame matching the causal ground truth requirements
-  df = pd.DataFrame({
-      "H": H,
-      "S": S,
-      "U_dep": U_dep,
-      "U_indep": U_indep,
-      "Y": Y
-  })
-  
-  return df
+  return {
+    "S": S,
+    "Y": Y,
+    "U_indep": U_indep,
+    "U_dep": U_dep
+  }
 
-def generate_observed_features(ground_truth_df: pd.DataFrame,
+def generate_observed_features(
+    ground_truth: dict,
     feature_map: dict,
     rng: np.random.Generator, 
     trial_index: int = 0
@@ -128,7 +133,11 @@ def generate_observed_features(ground_truth_df: pd.DataFrame,
   """
     Generates the set of features from the pre-configured feature map and using the previously generated clinical ground truth
   """
-  df = ground_truth_df.copy()
+  df = pd.DataFrame({
+    "S": ground_truth["S"],
+    "Y": ground_truth["Y"]
+  })
+
   enriched_map = json.loads(json.dumps(feature_map))
 
   pathway_latent_map = {
@@ -137,23 +146,36 @@ def generate_observed_features(ground_truth_df: pd.DataFrame,
     "ind": "U_indep"
   }
 
+  latent_dim_counters = {
+    "U_dep": 0,
+    "U_indep": 0
+  }
+
   for pathway_key, feature_list in enriched_map.items():
     if pathway_key not in pathway_latent_map:
       print(f"Warning: Pathway '{pathway_key}' is not mapped to an SCM latent. Skipping.")
       continue
         
     parent_latent_name = pathway_latent_map[pathway_key]
-
-    if parent_latent_name not in df.columns:
-      print(f"Error: Latent '{parent_latent_name}' does not exist in the ground truth DataFrame.")
-
-    latent_series = cast(pd.Series, df[parent_latent_name])
     
     for feature_spec in feature_list:
       name = feature_spec["name"]
       feat_type = feature_spec.get("type", "").lower()
       trial_key = f"parameters_trial_{trial_index}"
       existing_params = feature_spec.get(trial_key, None)
+
+      # Map feature to latent dimension
+      if existing_params and "latent_dim_idx" in existing_params:
+        dim_idx = existing_params["latent_dim_idx"]
+      else:
+        dim_idx = latent_dim_counters[parent_latent_name]
+
+      latent_dim_counters[parent_latent_name] += 1
+
+      if dim_idx > ground_truth[parent_latent_name].shape[1] - 1:
+        raise KeyError(f"Latent dimension assigned to feature {name} is outside of latent dimensionality.")
+
+      latent_series = ground_truth[parent_latent_name][:, dim_idx]
       
       if feat_type == "continuous":
         dist = feature_spec.get("dist", "normal")
@@ -169,6 +191,7 @@ def generate_observed_features(ground_truth_df: pd.DataFrame,
       else:
           raise ValueError(f"Unknown or unsupported feature type '{feat_type}' for feature '{name}'")
 
+      params['latent_dim_idx'] = dim_idx
       df[name] = data_array
       feature_spec[trial_key] = params
               

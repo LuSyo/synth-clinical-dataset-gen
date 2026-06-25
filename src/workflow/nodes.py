@@ -33,17 +33,22 @@ def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dic
   if rng is None:
     print("Warning: No active RNG stream found in RunnableConfig. Instantiating fallback stream.")
     rng = np.random.default_rng(seed=state.seed)
+
+  u_indep_dim = len(feature_map['soc']) + len(feature_map['ind'])
+  u_dep_dim = len(feature_map['bio'])
   
-  ground_truth_df = generate_clinical_ground_truth(
+  ground_truth = generate_clinical_ground_truth(
     n_pop=n_pop,
     s_prevalence=s_prevalence,
     y_prevalence=y_prevalence,
     diff_y_prev_factor=diff_y_prev_factor,
-    rng=rng
+    rng=rng,
+    u_dep_dim=u_dep_dim,
+    u_indep_dim=u_indep_dim
   )
 
   complete_df, updated_feature_map = generate_observed_features(
-    ground_truth_df=ground_truth_df,
+    ground_truth=ground_truth,
     feature_map=feature_map,
     rng=rng,
     trial_index=state.retry_count
