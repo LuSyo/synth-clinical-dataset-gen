@@ -30,7 +30,7 @@ class PipelinePrompts:
     "   - Early Trials (0 or 1): Make BOLDER moves! Swing gammas or betas by larger intervals (e.g., 0.4 to 1.5) to find the right baseline space.\n"
     "   - Later Trials (2+): Shift into micro-fine-tuning mode. Adjust baseline parameters by small deltas (e.g., 0.05 to 0.1) to lock in target performance.\n\n"
     
-    "Review the trajectory of raw metrics and parameters. If the actual Global AUPRC from the latest trial is below {target_raw_auprc}, set is_acceptable to False and provide adjustments for feature baseline keys ('gamma', 'beta', 'noise_std') in your response block. If baseline performance is acceptable, set is_acceptable to True."
+    "Review the trajectory of raw metrics and parameters, and learn from your past adjustments and results. If the actual Global AUPRC from the latest trial is below {target_raw_auprc}, set is_acceptable to False and provide adjustments for feature baseline keys ('gamma', 'beta', 'noise_std') in your response block. If baseline performance is acceptable, set is_acceptable to True."
   )
 
   BIASED_DATA_VALIDATION_PROMPT = (

@@ -40,7 +40,8 @@ def main():
 
   # Set up the RunnableConfig
   validation_llm = ChatOpenAI(
-    model="gpt-4o-mini", 
+    # model="gpt-4o-mini", 
+    model="gpt-5.4-mini", 
     temperature = 0,
     seed = args.seed)
     
