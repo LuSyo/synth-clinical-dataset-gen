@@ -9,31 +9,31 @@ from scipy.stats import rankdata, norm
 
 FEATURE_FORMULAS_CONTEXT = """
   ### Feature Generation Mechanics Context:
-  - Clinical Ground Truth Latents:
-    * H (Central health latent) ~ Gamma(shape=2.0, scale=1.5)
+  - **Clinical Ground Truth:**
     * S (Sensitive attribute) ~ Bernoulli(s_prevalence)
-    * U_dep (S-related latent) depends on H and S
-      - If S == 0: latent_link = 0.75, noise_multiplier = 0.2
-      - If S == 1: latent_link = 1.00, noise_multiplier = 3.0
-      - U_dep ~ (latent_link * H) + noise_multiplier * Gamma(shape=1.2, scale=1)
-    * U_indep (S-independent latent) depends on H only: 
-      - U_indep ~ 0.6 * H + Gamma(shape=2.1, scale=1)
-    * Y (Clinical outcome):
-      - Y ~ Bernoulli(sigmoid(beta_0 + 1.5 * normalized(log(U_dep + U_indep))))
-      - Note: beta_0 is calibrated via bisection search to exactly enforce the target y_prevalence.
-  - Pathway Mappings to Latents:
-    * "bio" features descend from latent U_dep
-    * "soc" features descend from latent U_indep
-    * "ind" features descend from latent U_indep
-  - Baseline True Features (from Feature Map):
-    * Continuous: 
-      - All incoming parent latents are standard-normalized (Mean=0, SD=1) 
-      - Normal: X = gamma * Normalized_Latent + beta + Normal(0, noise_std)
-      - Lognormal: X = abs(gamma) * exp(sign(gamma) * Normalized_Latent + Normal(0, noise_std)) + beta
-      - Note: The directional sign of gamma controls direct vs inverse latent correlation, while the absolute magnitude of gamma acts linear scale multiplier
-    * Binary: P(X=1) = sigmoid(gamma * Latent + beta)
-    * Categorical: Digitize an underlying continuous signal [gamma * Latent + Normal(0, noise_std)]
-      - Note: The n-1 class boundaries are calculated between the 5th and 95th percentiles of the continuous signal.
+    * **Multidimensional Latents:** H (Central health latent), U_dep, and U_indep are multidimensional matrices. 
+      * U_dep (S-related latent) depends on H and S
+      * U_indep (S-independent latent) depends on H only
+    * **Dimension Indexing:** Every feature extracts an independent sub-signal from its parent matrix using `latent_dim_idx`. 
+    * **Pathways:** "bio" features descend from U_dep (influenced by sensitive attribute S). "soc" and "ind" features descend from U_indep (independent of S).
+    * Y (Clinical outcome) depends on U_dep and U_indep
+
+  - **Feature Tuning Guide (How to adjust parameters):**
+    
+    * **Continuous:**
+      - **Latent State:** Automatically transformed into a perfectly standard-normal distribution $\\mathcal{N}(0, 1)$ before any parameters are applied.
+      - **gamma:** Adjusts the correlation magnitude and direction (positive vs. inverse) with the latent.
+      - **beta:** Linearly shifts the baseline absolute value/mean of the final feature up or down.
+      - **noise_std:** Controls the feature's variance and irreducible noise around the latent signal.
+
+    * **Binary:**
+      - **Latent State:** Uses the **raw, unnormalized** latent series. 
+      - **Formula:** $P(X=1) = \\text{sigmoid}(\\gamma * (\\text{Latent}_{\\text{raw}} - \\text{Median}) + \\beta)$
+      - **Tweak Logic:** Adjust $\\gamma$ to alter the causal strength or flip the correlation direction (positive vs. inverse). Adjust $\beta$ strictly to manage class prevalence: $\\beta = 0$ targets a balanced $\\sim 50%$ distribution, negative values reduce positive class prevalence, and positive values increase it
+
+    * **Categorical:**
+      - **Latent State:** Uses the **raw, unnormalized** latent series to construct a continuous proxy: $\\gamma \\cdot \\text{Latent}_{\\text{raw}} + \\text{Noise}$.
+      - **Tweak Logic:** This proxy is chunked into discrete bins using `absolute_thresholds`. Shifting these thresholds changes the population distribution across the categorical classes.
   """
 
 def generate_clinical_ground_truth(
@@ -266,7 +266,8 @@ def generate_binary_feat(
     gamma = float(rng.uniform(0.5, 1.8) * rng.choice([-1, 1]))
     beta = float(rng.uniform(-0.5, 0.5))
   
-  probabilities = expit(gamma * latent_series + beta)
+  latent_center = float(np.median(latent_series))
+  probabilities = expit(gamma * (latent_series - latent_center) + beta)
   data = rng.binomial(n=1, p=probabilities)
 
   params = {
