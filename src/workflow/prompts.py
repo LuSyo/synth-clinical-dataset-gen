@@ -63,7 +63,9 @@ class PipelinePrompts:
     "2. SHARED BUDGET COOLING SCHEDULE:\n"
     "   - Global Execution Progress: Trial run {current_trial} (Budget shared across generation and bias phases)\n"
     "   - Early/Mid Trials: If the biased disparity gap is weak, aggressively strengthen bias values (e.g., lower alpha closer to 0, increase p_suppress or p_down closer to 1.0).\n"
-    "   - Final Trials: Apply fine adjustments to stabilize metrics without breaking the classifier entirely.\n\n"
+    "   - Final Trials: Apply fine adjustments to stabilize metrics without breaking the classifier entirely.\n"
+    "   - CRITICAL: If you are reaching the end of your budget, go back to a configuration very close to your historical best.\n\n"
     
-    "If the observed disparities are within the acceptable windows, set is_acceptable to True. Otherwise, set is_acceptable to False and emit fine-tuned parameter adjustments exclusively for keys inside the 'bias_params' sub-blocks of 'soc' features"
+    "If the observed disparities are within the acceptable windows, set is_acceptable to True and do not try to improve your result.\n"
+    "Otherwise, set is_acceptable to False and emit fine-tuned parameter adjustments exclusively for keys inside the 'bias_params' sub-blocks of 'soc' features"
   )
