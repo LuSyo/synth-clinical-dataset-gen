@@ -214,10 +214,6 @@ def generate_continuous_feat(
   percentiles = (ranks - 0.5) / n_pop
   perfect_normal_latent = norm.ppf(percentiles)
 
-  latent_mean = float(latent_series.mean())
-  latent_std = float(latent_series.std()) if latent_series.std() > 0 else 1.0
-  norm_latent = (latent_series - latent_mean) / latent_std
-
   if existing_params and all(k in existing_params for k in ["gamma", "beta", "noise_std"]):
     gamma = existing_params["gamma"]
     beta = existing_params["beta"]
@@ -234,7 +230,7 @@ def generate_continuous_feat(
   if dist_type.lower().strip() == "lognormal":
     gamma_sign = np.sign(gamma) if gamma != 0 else 1.0
     gamma_magnitude = abs(gamma)
-    unscaled_lognormal = np.exp(gamma_sign * perfect_normal_latent + rng.normal(0, noise_std, size=n_pop))
+    unscaled_lognormal = np.exp(0.4 * gamma_sign * perfect_normal_latent + rng.normal(0, noise_std, size=n_pop))
     data = (gamma_magnitude * unscaled_lognormal) + beta
     dist_type = "lognormal"
     
