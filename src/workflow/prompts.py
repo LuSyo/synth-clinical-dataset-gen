@@ -1,70 +1,37 @@
 class PipelinePrompts:
 
   RAW_DATA_VALIDATION_PROMPT = (
-    "You are an expert ML and Data Engineer tuning a synthetic dataset generation pipeline.\n"
-    "Your SOLE objective is to reparametrise this synthetic dataset to reach the user's strict performance target.\n\n"
-
-    "CRITICAL CRITERIA:"
-    "- Target Minimum Global AUPRC: {target_raw_auprc}\n"
-    "- Current Global AUPRC: {current_auprc}\n\n"
-
-    "IMPORTANT: Completely ignore any subgroup disparities, recall gaps, or precision gaps.\n"
-    "Your only concern is ensuring the baseline predictive capacity (Global AUPRC) meets or exceeds the target threshold.\n\n"
-    
+    "Task: Reparametrise baseline feature distributions to satisfy predictive capacity.\n\n"
+    "Objective (Trial {current_trial}):\n"
+    "- Target Global AUPRC: >= {target_raw_auprc}\n"
+    "- Current Global AUPRC: {current_auprc}\n"
+    "- Scope: Optimize Global AUPRC only; completely ignore subgroup disparities.\n\n"
     "{formulas_context}\n\n"
-    
-    "# Multi-Trial Parameter Ledger (Feature Map):\n"
+    "Parameter History:\n"
     "{feature_map}\n\n"
-    
-    "# Latest Trial Dataset Summary (Table One):\n"
-    "{table_one}\n\n"
-    
-    "# Chronological History of Downstream Classifier Performance on RAW Features:\n"
+    "Performance History:\n"
     "{probe_results}\n\n"
-    
-    "# STRATEGIC OPTIMIZATION BOUNDARIES (CRITICAL):\n"
-    "1. PARAMETER SPACE CONSTRAINT: You are only permitted to modify baseline feature generation parameters ('gamma', 'beta', 'noise_std').\n"
-    
-    "COOLING EXPLORATION SCHEDULE (CRITICAL):\n"
-    "   - Current Execution Status: Trial run {current_trial}\n"
-    "   - Early Trials (0 or 1): Make BOLDER moves! Swing gammas or betas by larger intervals (e.g., 0.4 to 1.5) to find the right baseline space.\n"
-    "   - Later Trials (2+): Shift into micro-fine-tuning mode. Adjust baseline parameters by small deltas (e.g., 0.05 to 0.1) to lock in target performance.\n\n"
-    
-    "Review the trajectory of raw metrics and parameters, and learn from your past adjustments and results. Modify baseline feature generation parameters ('gamma', 'beta', 'noise_std') to reach the target Global AUPRC {target_raw_auprc}."
+    "Tuning Strategy:\n"
+    "- Only adjust feature parameters: 'gamma', 'beta', 'noise_std', 'absolute_thresholds'.\n"
+    "- Trials 0-1: Shift parameters with large deltas (0.4 to 1.5).\n"
+    "- Trials 2+: Micro-adjust parameters with small deltas (0.05 to 0.1).\n"
+    "Emit parameter overrides for the next trial."
   )
 
   BIASED_DATA_VALIDATION_PROMPT = (
-    "You are an expert ML and Data Engineer tuning a synthetic dataset generation pipeline.\n"
-    "Your SOLE objective is to tune post-generation sociological bias parameters to hit specific operational disparity scales.\n\n"
-    
-    "MATHEMATICAL TARGETS:\n"
-    "- Target Recall Disparity (Recall(S=1) - Recall(S=0)): {recall_disp_target_str}\n"
-    "- Target Precision/PPV Disparity (Precision(S=1) - Precision(S=0)): {ppv_disp_target_str}\n\n"
-
-    "CRITICAL WARNING: Completely ignore the AUPRC values."
-
-    "{formulas_context}\n\n"
+    "Task: Tune sociological bias parameters to achieve target disparities.\n\n"
+    "Objectives (Trial {current_trial}):\n"
+    "- Target Recall Disparity: {recall_disp_target_str} (Current: {current_recall_disp})\n"
+    "- Target PPV Disparity: {ppv_disp_target_str} (Current: {current_ppv_disp})\n"
+    "- Scope: Optimize disparities only; completely ignore Global AUPRC.\n\n"
     "{bias_context}\n\n"
-    
-    "# Multi-Trial Parameter Ledger (Feature Map):\n"
+    "Bias Parameter History (soc pathway):\n"
     "{feature_map}\n\n"
-    
-    "# Chronological History of Downstream Classifier Performance:\n"
+    "Performance History:\n"
     "{probe_results}\n\n"
-    
-    "# STRATEGIC OPTIMIZATION BOUNDARIES (CRITICAL):\n"
-    "1. BIAS PARAMETER CONSTRAINT: You are ONLY permitted to modify parameters inside the 'bias_params' dictionary block for features in the 'soc' pathway.\n"
-    "   - For type 'measurement_error', you can adjust: 'mu_bias', 'noise_std'\n"
-    "   - For type 'access_barrier', you can adjust: 'alpha', 'noise_std'\n"
-    "   - For type 'referral_bias', you can adjust: 'p_suppress'\n"
-    "   - For type 'under_classification', you can adjust: 'p_down'\n"
-    "   CRITICAL: Do NOT modify baseline parameters ('gamma', 'beta') under any circumstances.\n\n"
-    
-    "2. SHARED BUDGET COOLING SCHEDULE:\n"
-    "   - Global Execution Progress: Trial run {current_trial} (Budget shared across generation and bias phases)\n"
-    "   - Early/Mid Trials: If the biased disparity gap is weak, aggressively strengthen bias values (e.g., lower alpha closer to 0, increase p_suppress or p_down closer to 1.0).\n"
-    "   - Final Trials: Apply fine adjustments to stabilize metrics without breaking the classifier entirely.\n"
-    "   - CRITICAL: If you are reaching the end of your budget, go back to a configuration very close to your historical best.\n\n"
-    
-    "Review the trajectory of bias parameters and disparities, and learn from your past adjustments and results. Emit fine-tuned parameter adjustments exclusively for keys inside the 'bias_params' sub-blocks of 'soc' features, to achieve the target disparities."
+    "Tuning Strategy:\n"
+    "- Modify bias parameters for 'soc' features.\n"
+    "- Early Trials: Increase bias magnitude aggressively (e.g., lower alpha, increase p_suppress / p_down).\n"
+    "- Late Trials: Micro-adjust around the historical best trial configuration.\n"
+    "Emit updated bias parameters overrides for the next trial."
   )

@@ -65,6 +65,9 @@ class GraphState(BaseModel):
     description="The upper boundary ceiling to prevent infinite looping."
   )
 
+  input_tokens: int = Field(default=0, description="Total Input Tokens used by API calls")
+  output_tokens: int = Field(default=0, description="Total Output Tokens used by API calls")
+
   def __repr__(self):
     return (
             f"targets=[N={self.n_pop}, S_prev={self.s_prevalence}, Y_prev={self.y_prevalence}], "

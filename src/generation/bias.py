@@ -3,31 +3,17 @@ import numpy as np
 import copy
 from typing import Optional, Tuple
 
-BIAS_FORMULAS_CONTEXT = """
-### Sociological Bias Mechanics
-  * Applied exclusively to specified features in the 'soc' pathway for the marginalized group (where S == 0).
-  * True uncorrupted data remains in column 'feature_name'. The biased data is saved to column 'obs_feature_name' and passed to the downstream classifier instead of the original feature.
-  * The four selectable bias execution types are defined as follows:
-
-    1. type: "measurement_error" (Continuous features / additive bias)
-      - Corrupts target group entries via a systematic mean shift and heteroscedastic noise.
-      - Equation: X_obs = X_true + mu_bias + Normal(0, noise_std)
-      - Parameters: mu_bias (directional shift), noise_std (noise standard deviation).
-
-    2. type: "access_barrier" (Continuous features / acuity-based attenuation)
-      - Attenuates mild/stable measurements for patients with limited clinical access.
-      - Equation: If X_true < tau (empirical median): X_obs = X_true * alpha + Normal(0, noise_std)
-      - Parameters: alpha (multiplicative attenuation factor where closer to 0 is more severe suppression), noise_std (noise standard deviation).
-
-    3. type: "referral_bias" (Binary features / asymmetric entry suppression)
-      - Systematically suppresses positive clinical recommendations or track entries for qualified patients.
-      - Equation: If X_true == 1: P(X_obs = 1) = 1.0 - p_suppress. If X_true == 0: X_obs = 0.
-      - Parameters: p_suppress (probability of a true 1 being overridden to an observed 0).
-
-    4. type: "under_classification" (Categorical features / severity minimisation)
-      - Down-stages recorded clinical severity levels while protecting baseline class boundaries.
-      - Equation: If X_true > min_category_value: X_obs = X_true - 1 with stochastic probability (p_down * 0.95).
-      - Parameters: p_down (probability of dropping down exactly 1 severity tier).
+BIAS_FORMULAS_CONTEXT = """### Bias Levers (soc pathway only):
+  - measurement_error (Continuous):
+    * mu_bias: Additive mean shift applied to minority group (S=0).
+    * noise_std: Added distortion variance.
+  - access_barrier (Continuous):
+    * alpha: Attenuation factor in (0.0, 1.0] for S=0. Lower values suppress the feature signal more aggressively.
+    * noise_std: Added distortion variance.
+  - referral_bias (Binary):
+    * p_suppress: Probability in [0.0, 1.0] of suppressing a positive value (1 -> 0) for S=0.
+  - under_classification (Categorical):
+    * p_down: Probability in [0.0, 1.0] of decrementing class level (e.g., 2 -> 1) for S=0.
 """
 
 

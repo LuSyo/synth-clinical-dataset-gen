@@ -14,6 +14,7 @@ from generation.analysis import plot_dataset, create_table_one, run_downstream_p
 from generation.processing import stratified_sampling
 from utils import Config as CoreConfig
 from workflow.prompts import PipelinePrompts
+from workflow.formatting import format_bias_feature_history, format_raw_feature_history
 
 def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dict:
   """
@@ -190,13 +191,18 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
     rng=rng
   )
 
-  print(auprc)
-
   heading_insert = "(Raw Baseline Features)" if state.phase == "generation" else "(Biased Observed Features)"
   
-  new_results_str = (f"## Downstream Probe Results {heading_insert}: Trial {state.retry_count} \n\n{new_probe_results_table}\n\nRecall Disparity (Recall(S=1) - Recall(S=0)): {recall_disp}\nPrecision/PPV Disparity (Precision(S=1) - Precision(S=0)): {precision_disp}\n\n")
+  new_full_results_str = (f"## Downstream Probe Results {heading_insert}: Trial {state.retry_count} \n\n{new_probe_results_table}\n\nRecall Disparity (Recall(S=1) - Recall(S=0)): {recall_disp}\nPrecision/PPV Disparity (Precision(S=1) - Precision(S=0)): {precision_disp}\n\n")
 
-  accumulated_results = (state.probe_results or "") + new_results_str
+  new_abridged_results_str = (
+    f"- T{state.retry_count} ({state.phase}): "
+    f"AUPRC = {auprc:.3f} | "
+    f"Recall Disp = {recall_disp:.3f} | "
+    f"PPV Disp = {precision_disp:.3f}\n"
+  )
+
+  accumulated_abridged_results = (state.probe_results or "") + new_abridged_results_str
 
   if state.phase == "generation":
     val_passed = auprc >= state.target_raw_auprc
@@ -215,13 +221,13 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
 
   os.makedirs(output_dir, exist_ok=True)
   report_path = os.path.join(output_dir, "probe_results.md")
-  with open(report_path, "w") as f:
-    f.write(accumulated_results)
+  with open(report_path, "a") as f:
+    f.write(new_full_results_str)
     
   print(f"Success! Downstream probe results written to: {report_path}")
 
   return {
-    "probe_results": accumulated_results,
+    "probe_results": accumulated_abridged_results,
     "current_auprc": auprc,
     "current_recall_disp": recall_disp,
     "current_precision_disp": precision_disp,
@@ -275,27 +281,20 @@ def reparametrise_raw_dataset(state: GraphState, config: RunnableConfig) -> dict
     print("Error: No dataset found in state to validate.")
     return {"validation_passed": False}
 
-  # Get the Table One
   metadata = config.get("metadata") or {}
   exp_name = metadata.get("exp_name", "default_exp")
   run_name = metadata.get("run_name", "default_run")
   output_dir = f"{CoreConfig.DATA_DIR}/{exp_name}/{run_name}"
 
-  table_one_path = os.path.join(output_dir, "table_one.txt")
-  table_one_content = "Table One artifact not found."
-  if os.path.exists(table_one_path):
-    with open(table_one_path, "r") as f:
-      table_one_content = f.read()
-
   # Feature map, including feature parameters
-  feature_map_str = json.dumps(state.feature_map, indent=2)
+  feature_map_str = format_raw_feature_history(state.feature_map, current_trial)
 
   # Downstream probe results
   probe_results_str = state.probe_results or "No probe results available."
   current_auprc = state.current_auprc or "Undefined"
   
   llm = metadata["validation_llm"]
-  structured_llm = llm.with_structured_output(DatasetValidationResult)
+  structured_llm = llm.with_structured_output(DatasetValidationResult, include_raw=True)
 
   prompt = ChatPromptTemplate.from_messages([
     ("system", PipelinePrompts.RAW_DATA_VALIDATION_PROMPT),
@@ -303,19 +302,27 @@ def reparametrise_raw_dataset(state: GraphState, config: RunnableConfig) -> dict
   ])
 
   chain = prompt | structured_llm
-  result: DatasetValidationResult = chain.invoke({
+  response = chain.invoke({
     "formulas_context": FEATURE_FORMULAS_CONTEXT,
     "feature_map": feature_map_str,
-    "table_one": table_one_content,
     "probe_results": probe_results_str,
     "current_trial": current_trial,
     "target_raw_auprc": state.target_raw_auprc,
     "current_auprc": current_auprc
   })
 
-  print(f"[Reparametrisation Reasoning]: {result.reasoning}")
-
+  result: DatasetValidationResult = response["parsed"]
+  
   updates: dict = {}
+  
+  # ------ USAGE ------
+  raw_message = response["raw"]
+  usage = getattr(raw_message, "usage_metadata", {}) or {}
+  updates["input_tokens"] = usage.get("input_tokens", 0)
+  updates["output_tokens"] = usage.get("output_tokens", 0)
+  # -------------------
+
+  print(f"[Reparametrisation Reasoning]: {result.reasoning}")
     
   updates["retry_count"] = state.retry_count + 1
 
@@ -418,26 +425,19 @@ def reparametrise_biased_dataset(state: GraphState, config: RunnableConfig) -> d
 
   # ==========================================
 
-  # Get the Table One
   metadata = config.get("metadata") or {}
   exp_name = metadata.get("exp_name", "default_exp")
   run_name = metadata.get("run_name", "default_run")
   output_dir = f"{CoreConfig.DATA_DIR}/{exp_name}/{run_name}"
 
-  table_one_path = os.path.join(output_dir, "table_one.txt")
-  table_one_content = "Table One artifact not found."
-  if os.path.exists(table_one_path):
-    with open(table_one_path, "r") as f:
-      table_one_content = f.read()
-
   # Feature map, including feature parameters
-  feature_map_str = json.dumps(state.feature_map, indent=2)
+  feature_map_str = format_bias_feature_history(state.feature_map, current_trial)
 
   # Downstream probe results
   probe_results_str = state.probe_results or "No probe results available."
 
   llm = metadata["validation_llm"]
-  structured_llm = llm.with_structured_output(DynamicBiasValidationResult)
+  structured_llm = llm.with_structured_output(DynamicBiasValidationResult, include_raw=True)
 
   prompt = ChatPromptTemplate.from_messages([
     ("system", PipelinePrompts.BIASED_DATA_VALIDATION_PROMPT),
@@ -445,11 +445,10 @@ def reparametrise_biased_dataset(state: GraphState, config: RunnableConfig) -> d
   ])
 
   chain = prompt | structured_llm
-  result = chain.invoke({
+  response = chain.invoke({
     "formulas_context": FEATURE_FORMULAS_CONTEXT,
     "bias_context": BIAS_FORMULAS_CONTEXT,
     "feature_map": feature_map_str,
-    "table_one": table_one_content,
     "probe_results": probe_results_str,
     "current_trial": current_trial,
     "recall_disp_target_str": recall_disp_target_str,
@@ -458,9 +457,18 @@ def reparametrise_biased_dataset(state: GraphState, config: RunnableConfig) -> d
     "current_ppv_disp": current_ppv_disp
   })
 
-  print(f"[Reparametrisation Reasoning]: {result.reasoning}")
-
+  result = response["parsed"]
+  
   updates: dict = {}
+  
+  # ------ USAGE ------
+  raw_message = response["raw"]
+  usage = getattr(raw_message, "usage_metadata", {}) or {}
+  updates["input_tokens"] = usage.get("input_tokens", 0)
+  updates["output_tokens"] = usage.get("output_tokens", 0)
+  # -------------------
+
+  print(f"[Reparametrisation Reasoning]: {result.reasoning}")
     
   updates["retry_count"] = state.retry_count + 1
 

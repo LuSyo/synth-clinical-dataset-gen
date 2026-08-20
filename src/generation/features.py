@@ -21,20 +21,16 @@ FEATURE_FORMULAS_CONTEXT = """
 
   - **Feature Tuning Guide (How to adjust parameters):**
     
-    * **Continuous:**
-      - **Latent State:** Automatically transformed into a perfectly standard-normal distribution $\\mathcal{N}(0, 1)$ before any parameters are applied.
-      - **gamma:** Adjusts the correlation magnitude and direction (positive vs. inverse) with the latent.
-      - **beta:** Linearly shifts the baseline absolute value/mean of the final feature up or down.
-      - **noise_std:** Controls the feature's variance and irreducible noise around the latent signal.
-
-    * **Binary:**
-      - **Latent State:** Uses the **raw, unnormalized** latent series. 
-      - **Formula:** $P(X=1) = \\text{sigmoid}(\\gamma * (\\text{Latent}_{\\text{raw}} - \\text{Median}) + \\beta)$
-      - **Tweak Logic:** Adjust $\\gamma$ to alter the causal strength or flip the correlation direction (positive vs. inverse). Adjust $\beta$ strictly to manage class prevalence: $\\beta = 0$ targets a balanced $\\sim 50%$ distribution, negative values reduce positive class prevalence, and positive values increase it
-
-    * **Categorical:**
-      - **Latent State:** Uses the **raw, unnormalized** latent series to construct a continuous proxy: $\\gamma \\cdot \\text{Latent}_{\\text{raw}} + \\text{Noise}$.
-      - **Tweak Logic:** This proxy is chunked into discrete bins using `absolute_thresholds`. Shifting these thresholds changes the population distribution across the categorical classes.
+    - Continuous (Normal / Lognormal):
+      * gamma: Signal strength and direction (+ or -) relative to latent.
+      * beta: Mean baseline shift.
+      * noise_std: Irreducible variance (lower = clearer signal).
+    - Binary:
+      * gamma: Causal strength and direction (+ or -).
+      * beta: Class prevalence shift (0.0 targets ~50%; negative reduces positive prevalence; positive increases it).
+    - Categorical:
+      * absolute_thresholds: Ascending cutoff list [t1, t2, ...] governing class distribution.
+      * noise_std: Noise added prior to threshold binning.
   """
 
 def generate_clinical_ground_truth(

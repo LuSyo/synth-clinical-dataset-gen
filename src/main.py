@@ -3,16 +3,14 @@ import os
 import mlflow
 import pandas as pd
 import numpy as np
+import uuid
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.runnables import RunnableConfig
-from utils import parse_args, load_config, set_global_seeds, setup_logger, Config
+from utils import parse_args, load_config, set_global_seeds, setup_logger, set_mlflow_exp,Config
 
 mlflow.set_tracking_uri(Config.MLFLOW_TRACKING_URI)
-mlflow.langchain.autolog(
-  log_traces=True, 
-  run_tracer_inline=True
-)
+mlflow.langchain.autolog()
 
 from workflow.graph import build_graph
 from workflow.schema import GraphState
@@ -32,9 +30,7 @@ def main():
 
   feature_map = load_config(args.mapping)
 
-  mlflow.set_experiment(args.exp_name)
-
-  mlflow.langchain.autolog()
+  set_mlflow_exp(args.exp_name, Config.MLFLOW_TRACKING_URI)
 
   app = build_graph()
 
@@ -44,17 +40,20 @@ def main():
     model="gpt-5.4-mini", 
     temperature = 0,
     seed = args.seed)
-    
-  config = RunnableConfig(metadata={
-    "validation_llm": validation_llm,
-    "exp_name": args.exp_name,
-    "run_name": args.run_name,
-    "rng": rng
-  })
 
   # ----- START THE RUN -----
   with mlflow.start_run(run_name=args.run_name) as run:
     mlflow.log_params(vars(args))
+
+    config = RunnableConfig(
+      # run_id=uuid.uuid4(),
+      # configurable={"thread_id": str(uuid.uuid4())},
+      metadata={
+      "validation_llm": validation_llm,
+      "exp_name": args.exp_name,
+      "run_name": args.run_name,
+      "rng": rng
+    })
 
     initial_state = GraphState(
       n_pop=args.n_pop,

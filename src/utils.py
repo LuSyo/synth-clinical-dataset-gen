@@ -8,6 +8,8 @@ import logging
 import sys
 import json
 from enums import TargetDisp
+import mlflow
+from mlflow.tracking import MlflowClient
 
 def parse_args():
   date_str = datetime.datetime.now().strftime('%Y-%m-%d')
@@ -84,10 +86,20 @@ def setup_logger(log_dir, exp_name):
   return logger
 
 def set_global_seeds(seed):
-  random.seed(seed)
+  # random.seed(seed)
   np.random.seed(seed)
   # torch.manual_seed(seed)
   # torch.cuda.manual_seed_all(seed)
+
+def set_mlflow_exp(exp_name, tracking_uri):
+  client = MlflowClient(tracking_uri=tracking_uri)
+
+  exp = client.get_experiment_by_name(exp_name)
+  if exp and exp.lifecycle_stage == "deleted":
+    client.restore_experiment(exp.experiment_id)
+    print(f"Experiment '{exp_name}' restored.")
+
+  mlflow.set_experiment(exp_name)
 
 class Config:
   DATA_DIR = './data'
