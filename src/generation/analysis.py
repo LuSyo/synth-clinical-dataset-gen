@@ -284,11 +284,12 @@ def run_downstream_probe(
 
   recall_disparity = disp(subgroup_metrics[1]['recall'], subgroup_metrics[0]['recall'])
   precision_disparity = disp(subgroup_metrics[1]['precision'], subgroup_metrics[0]['precision'])
+  mean_auprc = np.nanmean(global_metrics['auprc'])
 
   report_df = pd.DataFrame(report_rows)
   markdown_table = report_df.to_markdown(index=False)
 
-  return markdown_table, recall_disparity, precision_disparity
+  return markdown_table, mean_auprc, recall_disparity, precision_disparity
 
 # def format_probe_results(results, groups):
 #   columns = [c.removeprefix("u_") for c in results.filter(regex="u_.*").columns]

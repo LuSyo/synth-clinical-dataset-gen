@@ -47,6 +47,9 @@ class GraphState(BaseModel):
 
   # Dataset downstream impact
   probe_results: Optional[str] = Field(default=None, description="Predictive performance metrics of a downstream classifier trained on the generated dataset.")
+  current_auprc: Optional[float] = Field(default=0.0, description="AUPRC of the downstream classifier trained on the latest generated dataset.")
+  current_recall_disp: Optional[float] = Field(default=0.0, description="Recall Disparity (Recall(S=1) - Recall(S=0)) of the downstream classifier trained on the latest generated dataset.")
+  current_precision_disp: Optional[float] = Field(default=0.0, description="Precision/PPV Disparity (Precision(S=1) - Precision(S=0)) of the downstream classifier trained on the latest generated dataset.")
 
   # Pipeline Artifact Tracking
   dataset_path: Optional[str] = Field(default=None, description="Local path to the currently generated CSV dataset.")
@@ -110,16 +113,13 @@ class UnderClassificationParams(BaseModel):
   p_down: float = Field(description="Stochastic probability of dropping down exactly 1 severity tier, bounded within (0, 1).")
 
 class ValidationResult(BaseModel):
-  is_acceptable: bool = Field(
-    description="True if the actual metrics are reasonably close to the targets (allowing for small stochastic sampling variance), False if they diverge significantly."
-  )
   reasoning: str = Field(
-    description="A concise explanation detailing your evaluation of the dataset vs user expectations and your suggested adjustments to parameters."
+    description="A concise explanation of your suggested adjustments to parameters."
   )
 
 class DatasetValidationResult(ValidationResult):
   adjusted_parameters: Optional[List[FeatureParameterOverride]] = Field(
     default=None,
-    description="If is_acceptable is False, provide a list of specific feature parameter additions/modifications. Leave as None if is_acceptable is True."
+    description="Provide a list of specific feature parameter additions/modifications."
   )
 

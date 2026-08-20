@@ -56,7 +56,8 @@ def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dic
   
   return {
     "df": complete_df,
-    "feature_map": updated_feature_map
+    "feature_map": updated_feature_map,
+    "validation_passed": False
   }
 
 def apply_bias(state: GraphState, config: RunnableConfig) -> dict:
@@ -81,7 +82,8 @@ def apply_bias(state: GraphState, config: RunnableConfig) -> dict:
   return {
     "df": biased_df,
     "feature_map": updated_feature_map,
-    "phase": "bias"
+    "phase": "bias",
+    "validation_passed": False
   }
 
 def save_dataset(state: GraphState, config: RunnableConfig) -> dict:
@@ -177,7 +179,7 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
   n_train = metadata.get("n_train", CoreConfig.N_TRAIN)
   n_test = metadata.get("n_test", CoreConfig.N_TEST)
   
-  new_probe_results_table, recall_disp, precision_disp = run_downstream_probe(
+  new_probe_results_table, auprc, recall_disp, precision_disp = run_downstream_probe(
     df=state.df,
     feature_map=state.feature_map,
     n_test=n_test,
@@ -186,10 +188,28 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
     rng=rng
   )
 
+  print(auprc)
+
   heading_insert = "(Raw Baseline Features)" if state.phase == "generation" else "(Biased Observed Features)"
+  
   new_results_str = (f"## Downstream Probe Results {heading_insert}: Trial {state.retry_count} \n\n{new_probe_results_table}\n\nRecall Disparity (Recall(S=1) - Recall(S=0)): {recall_disp}\nPrecision/PPV Disparity (Precision(S=1) - Precision(S=0)): {precision_disp}\n\n")
 
   accumulated_results = (state.probe_results or "") + new_results_str
+
+  if state.phase == "generation":
+    val_passed = auprc >= state.target_raw_auprc
+  else:
+    val_passed = True
+    if state.target_disp == TargetDisp.both or state.target_disp == TargetDisp.recall:
+      val_passed = val_passed and (
+        recall_disp >= state.target_biased_recall_disp - state.disparity_tolerance and
+        recall_disp <= state.target_biased_recall_disp + state.disparity_tolerance
+      )
+    if state.target_disp == TargetDisp.both or state.target_disp == TargetDisp.ppv:
+      val_passed = val_passed and (
+        precision_disp >= state.target_biased_ppv_disp - state.disparity_tolerance and
+        precision_disp <= state.target_biased_ppv_disp + state.disparity_tolerance
+      )
 
   os.makedirs(output_dir, exist_ok=True)
   report_path = os.path.join(output_dir, "probe_results.md")
@@ -199,7 +219,11 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
   print(f"Success! Downstream probe results written to: {report_path}")
 
   return {
-    "probe_results": accumulated_results
+    "probe_results": accumulated_results,
+    "current_auprc": auprc,
+    "current_recall_disp": recall_disp,
+    "current_precision_disp": precision_disp,
+    "validation_passed": val_passed
   }
 
 def sample_dataset(state: GraphState, config: RunnableConfig) -> dict:
@@ -236,15 +260,14 @@ def sample_dataset(state: GraphState, config: RunnableConfig) -> dict:
     "test_df": test_df
   }
 
-def validate_raw_dataset(state: GraphState, config: RunnableConfig) -> dict:
+def reparametrise_raw_dataset(state: GraphState, config: RunnableConfig) -> dict:
   """
   LLM node: Inspects the original user query, the feature map parameters,
-  the data summary (Table One), and downstream classifier probe results to validate 
-  if the user's expectations and target disparities are satisfied, and update feature generation parameters if not.
+  the data summary (Table One), and downstream classifier probe results to reparametrise feature generation.
   """
   current_trial = state.retry_count
   next_trial = current_trial + 1
-  print(f"---> Validating generated dataset against user's expectations (Trial {current_trial})")
+  print(f"---> Reparametrising Raw Features Generation (Trial {current_trial})")
 
   if state.df is None:
     print("Error: No dataset found in state to validate.")
@@ -267,13 +290,14 @@ def validate_raw_dataset(state: GraphState, config: RunnableConfig) -> dict:
 
   # Downstream probe results
   probe_results_str = state.probe_results or "No probe results available."
+  current_auprc = state.current_auprc or "Undefined"
   
   llm = metadata["validation_llm"]
   structured_llm = llm.with_structured_output(DatasetValidationResult)
 
   prompt = ChatPromptTemplate.from_messages([
     ("system", PipelinePrompts.RAW_DATA_VALIDATION_PROMPT),
-    ("human", "Evaluate the dataset.")
+    ("human", "Reparametrise the features in this dataset.")
   ])
 
   chain = prompt | structured_llm
@@ -283,63 +307,57 @@ def validate_raw_dataset(state: GraphState, config: RunnableConfig) -> dict:
     "table_one": table_one_content,
     "probe_results": probe_results_str,
     "current_trial": current_trial,
-    "target_raw_auprc": state.target_raw_auprc
+    "target_raw_auprc": state.target_raw_auprc,
+    "current_auprc": current_auprc
   })
 
-  print(f"[Raw dataset validation result]: {result.is_acceptable}")
-  print(f"[Evaluation Reasoning]: {result.reasoning}")
+  print(f"[Reparametrisation Reasoning]: {result.reasoning}")
 
-  updates: dict = {
-    "validation_passed": result.is_acceptable,
-  }
+  updates: dict = {}
     
-  if result.is_acceptable:
-    updates["feature_map"] = state.feature_map
-  else:
-    updates["retry_count"] = state.retry_count + 1
+  updates["retry_count"] = state.retry_count + 1
 
-    if result.adjusted_parameters:
-      print(f"[Optimisation]: Applying {len(result.adjusted_parameters)} fine-tuned overrides directly to feature_map.")
-      
-      updated_map = copy.deepcopy(state.feature_map)
-      current_trial_key = f"parameters_trial_{current_trial}"
-      next_trial_key = f"parameters_trial_{next_trial}"
+  if result.adjusted_parameters:
+    print(f"[Optimisation]: Applying {len(result.adjusted_parameters)} fine-tuned overrides directly to feature_map.")
+    
+    updated_map = copy.deepcopy(state.feature_map)
+    current_trial_key = f"parameters_trial_{current_trial}"
+    next_trial_key = f"parameters_trial_{next_trial}"
 
-      for pathway in updated_map:
-          for feature in updated_map[pathway]:
-            if current_trial_key in feature:
-              feature[next_trial_key] = copy.deepcopy(feature[current_trial_key])
-      
-      for override in result.adjusted_parameters:
-        pathway = override.pathway
-        if pathway in updated_map:
-          for feature in updated_map[pathway]:
-            if feature.get("name") == override.name:
-              if next_trial_key not in feature or feature[next_trial_key] is None:
-                feature[next_trial_key] = {}
-              
-              if override.gamma is not None:
-                feature[next_trial_key]["gamma"] = override.gamma
-              if override.beta is not None:
-                feature[next_trial_key]["beta"] = override.beta
-              if override.noise_std is not None:
-                feature[next_trial_key]["noise_std"] = override.noise_std
-              if override.absolute_thresholds is not None:
-                feature[next_trial_key]["absolute_thresholds"] = override.absolute_thresholds
-      
-      updates["feature_map"] = updated_map
+    for pathway in updated_map:
+        for feature in updated_map[pathway]:
+          if current_trial_key in feature:
+            feature[next_trial_key] = copy.deepcopy(feature[current_trial_key])
+    
+    for override in result.adjusted_parameters:
+      pathway = override.pathway
+      if pathway in updated_map:
+        for feature in updated_map[pathway]:
+          if feature.get("name") == override.name:
+            if next_trial_key not in feature or feature[next_trial_key] is None:
+              feature[next_trial_key] = {}
+            
+            if override.gamma is not None:
+              feature[next_trial_key]["gamma"] = override.gamma
+            if override.beta is not None:
+              feature[next_trial_key]["beta"] = override.beta
+            if override.noise_std is not None:
+              feature[next_trial_key]["noise_std"] = override.noise_std
+            if override.absolute_thresholds is not None:
+              feature[next_trial_key]["absolute_thresholds"] = override.absolute_thresholds
+    
+    updates["feature_map"] = updated_map
 
   return updates
 
-def validate_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
+def reparametrise_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
   """
   LLM node: Inspects the original user query, the feature map parameters,
-  the data summary (Table One), and downstream classifier probe results to validate 
-  if the user's expectations and target disparities are satisfied, and update feature bias parameters if not.
+  the data summary (Table One), and downstream classifier probe results to update feature bias parameters.
   """
   current_trial = state.retry_count
   next_trial = current_trial + 1
-  print(f"---> Validating biased dataset against user's expectations (Trial {current_trial})")
+  print(f"---> Reparametrising biased dataset (Trial {current_trial})")
 
   if state.df is None:
     print("Error: No dataset found in state to validate.")
@@ -352,6 +370,8 @@ def validate_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
   
   recall_disp_target_str = "No specific target"
   ppv_disp_target_str = "No specific target"
+  current_ppv_disp = state.current_precision_disp
+  current_recall_disp = state.current_recall_disp
 
   if state.target_disp == TargetDisp.both or state.target_disp == TargetDisp.recall:
     lower_recall_disp = round(state.target_biased_recall_disp - state.disparity_tolerance, 3)
@@ -419,7 +439,7 @@ def validate_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
 
   prompt = ChatPromptTemplate.from_messages([
     ("system", PipelinePrompts.BIASED_DATA_VALIDATION_PROMPT),
-    ("human", "Evaluate the dataset.")
+    ("human", "Reparametrise feature bias in this dataset.")
   ])
 
   chain = prompt | structured_llm
@@ -431,47 +451,42 @@ def validate_biased_dataset(state: GraphState, config: RunnableConfig) -> dict:
     "probe_results": probe_results_str,
     "current_trial": current_trial,
     "recall_disp_target_str": recall_disp_target_str,
-    "ppv_disp_target_str": ppv_disp_target_str
+    "ppv_disp_target_str": ppv_disp_target_str,
+    "current_recall_disp": current_recall_disp,
+    "current_ppv_disp": current_ppv_disp
   })
 
-  print(f"[Biased dataset validation result]: {result.is_acceptable}")
-  print(f"[Evaluation Reasoning]: {result.reasoning}")
+  print(f"[Reparametrisation Reasoning]: {result.reasoning}")
 
-  updates: dict = {
-    "validation_passed": result.is_acceptable,
-  }
+  updates: dict = {}
     
-  if result.is_acceptable:
-    updates["feature_map"] = state.feature_map
-    updates["phase"] = "complete"
-  else:
-    updates["retry_count"] = state.retry_count + 1
+  updates["retry_count"] = state.retry_count + 1
 
-    updated_map = copy.deepcopy(state.feature_map)
-    current_trial_key = f"parameters_trial_{current_trial}"
-    next_trial_key = f"parameters_trial_{next_trial}"
+  updated_map = copy.deepcopy(state.feature_map)
+  current_trial_key = f"parameters_trial_{current_trial}"
+  next_trial_key = f"parameters_trial_{next_trial}"
+
+  for feature in updated_map["soc"]:
+    if current_trial_key in feature:
+      feature[next_trial_key] = copy.deepcopy(feature[current_trial_key])
+
+  if result.adjusted_parameters and "soc" in updated_map:
+    print(f"[Optimisation]: Applying fine-tuned overrides to feature_map bias blocks.")
+
+    emitted_overrides = result.adjusted_parameters.model_dump(exclude_none=True)
 
     for feature in updated_map["soc"]:
-      if current_trial_key in feature:
-        feature[next_trial_key] = copy.deepcopy(feature[current_trial_key])
+      f_name = feature.get("name")
+      if f_name in emitted_overrides:
+        if next_trial_key not in feature or feature[next_trial_key] is None:
+          feature[next_trial_key] = {}
 
-    if result.adjusted_parameters and "soc" in updated_map:
-      print(f"[Optimization]: Applying fine-tuned overrides to feature_map bias blocks.")
+        if "bias_params" not in feature[next_trial_key] or feature[next_trial_key]["bias_params"] is None:
+          feature[next_trial_key]["bias_params"] = {}
+        
+        for b_key, b_val in emitted_overrides[f_name].items():
+          feature[next_trial_key]["bias_params"][b_key] = b_val
 
-      emitted_overrides = result.adjusted_parameters.model_dump(exclude_none=True)
-
-      for feature in updated_map["soc"]:
-        f_name = feature.get("name")
-        if f_name in emitted_overrides:
-          if next_trial_key not in feature or feature[next_trial_key] is None:
-            feature[next_trial_key] = {}
-
-          if "bias_params" not in feature[next_trial_key] or feature[next_trial_key]["bias_params"] is None:
-            feature[next_trial_key]["bias_params"] = {}
-          
-          for b_key, b_val in emitted_overrides[f_name].items():
-            feature[next_trial_key]["bias_params"][b_key] = b_val
-
-    updates["feature_map"] = updated_map
+  updates["feature_map"] = updated_map
 
   return updates
