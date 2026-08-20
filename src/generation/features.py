@@ -6,6 +6,7 @@ from typing import cast, Tuple, Dict, Any, Optional
 from scipy.special import expit
 from scipy.optimize import bisect
 from scipy.stats import rankdata, norm
+from sklearn.metrics import average_precision_score
 
 FEATURE_FORMULAS_CONTEXT = """
   ### Feature Generation Mechanics Context:
@@ -40,6 +41,7 @@ def generate_clinical_ground_truth(
   n_pop: int, 
   s_prevalence: float, 
   y_prevalence: float, 
+  target_auprc: float,
   diff_y_prev_factor: float,
   rng: np.random.Generator,
   h_dim: int = 3,
@@ -99,20 +101,43 @@ def generate_clinical_ground_truth(
   structural_signal = np.log(U_dep.mean(axis=1) + U_indep.mean(axis=1))
   structural_signal_normed = (structural_signal - structural_signal.mean())/structural_signal.std()
 
-  # irreducible noise
-  noise_factor = 1.5
-
-  def objective_function(beta_0, scaled_signal, target):
+  def prevalence_objective(beta_0, scaled_signal, target_y_prev):
     # Computes the difference between expected sample prevalence and target prevalence
-    return np.mean(expit(beta_0 + scaled_signal)) - target
+    return np.mean(expit(beta_0 + scaled_signal)) - target_y_prev
+
+  def auprc_objective(test_noise_factor, structural_signal, target_y_prev, target_auprc):
+    scaled_signal = test_noise_factor * structural_signal
+
+    beta_0 = bisect(prevalence_objective, -15, 15, args=(scaled_signal, target_y_prev))
+
+    log_odds = beta_0 + scaled_signal
+    y_prob = expit(log_odds)
+
+    temp_rng = np.random.default_rng(seed=42)
+    y_temp = temp_rng.binomial(n=1, p=y_prob)
+
+    current_auprc = average_precision_score(y_temp, y_prob)
+
+    return current_auprc - target_auprc
+
+  # Add buffer of 0.15 to the target AUPRC to account for downstream features noise in the prediction
+  target_theoretical_auprc = min(0.95, target_auprc + 0.15)
+
+  try:
+    optimal_noise_factor = bisect(
+      auprc_objective, 0.1, 10.0, 
+      args=(structural_signal_normed, y_prevalence, target_theoretical_auprc)
+    )
+  except ValueError:
+    optimal_noise_factor = 3.0
 
   # find the intercept where the objective function equals 0
-  scaled_signal = noise_factor * structural_signal_normed
-  beta_0 = bisect(objective_function, -10, 10, args=(scaled_signal, y_prevalence))
+  final_scaled_signal = optimal_noise_factor * structural_signal_normed
+  beta_0 = bisect(prevalence_objective, -15, 15, args=(final_scaled_signal, y_prevalence))
 
   # generate log-odds and probabilities
-  log_odds_noisy = beta_0 + scaled_signal
-  Y_prob = expit(log_odds_noisy)
+  log_odds = beta_0 + final_scaled_signal
+  Y_prob = expit(log_odds)
 
   # stochastic sampling of the true outcome
   Y = rng.binomial(n=1, p=Y_prob)

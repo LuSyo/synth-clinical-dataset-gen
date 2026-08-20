@@ -27,6 +27,7 @@ def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dic
   y_prevalence = state.y_prevalence
   diff_y_prev_factor = state.diff_y_prev_factor
   feature_map = state.feature_map
+  target_auprc = state.target_raw_auprc
 
   metadata = config.get("metadata") or {}
   rng = metadata.get("rng")
@@ -41,6 +42,7 @@ def generate_ground_truth_data(state: GraphState, config: RunnableConfig) -> dic
     n_pop=n_pop,
     s_prevalence=s_prevalence,
     y_prevalence=y_prevalence,
+    target_auprc=target_auprc,
     diff_y_prev_factor=diff_y_prev_factor,
     rng=rng,
     u_dep_dim=u_dep_dim,
