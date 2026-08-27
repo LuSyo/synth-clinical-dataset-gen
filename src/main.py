@@ -3,7 +3,6 @@ import os
 import mlflow
 import pandas as pd
 import numpy as np
-import uuid
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.runnables import RunnableConfig
@@ -43,8 +42,6 @@ def main():
     mlflow.log_params(vars(args))
 
     config = RunnableConfig(
-      # run_id=uuid.uuid4(),
-      # configurable={"thread_id": str(uuid.uuid4())},
       metadata={
       "validation_llm": validation_llm,
       "exp_name": args.exp_name,

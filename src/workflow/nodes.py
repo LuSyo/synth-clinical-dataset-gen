@@ -234,8 +234,8 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
     "recall_disp": float(recall_disp),
     "ppv_disp": float(precision_disp),
   }
-
-  mlflow.log_metrics(metrics_to_log, step=state.retry_count)
+  step = state.retry_count if state.phase == "generation" else state.retry_count + 1
+  mlflow.log_metrics(metrics_to_log, step=step)
 
   return {
     "probe_results": accumulated_abridged_results,

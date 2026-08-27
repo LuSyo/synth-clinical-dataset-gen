@@ -76,7 +76,20 @@ def route_reparametrise(state: GraphState) -> str:
   Conditional router determining whether validation is needed to inform next retries
   or if max retry count has been reached
   """
-  if state.phase == "generation" and state.retry_count >= state.max_retries // 2:
+  if state.validation_passed:
+    print("---> Validation passed. Moving to next phase.")
+    if state.phase == "generation":
+      mlflow.log_metrics({
+        "raw_gen_trials": state.retry_count,
+        "raw_gen_converged": 1
+      })
+    else:
+      mlflow.log_metrics({
+        "bias_converged": 1
+      })
+    return "skip"
+
+  elif state.phase == "generation" and state.retry_count >= state.max_retries // 2:
     print("---> Skipping reparametrisation: Saving retries budget for bias application.")
     mlflow.log_metrics({"raw_gen_trials": state.retry_count})
     return "skip"
@@ -85,10 +98,6 @@ def route_reparametrise(state: GraphState) -> str:
     print(f"---> Hard iteration ceiling reached ({state.retry_count}/{state.max_retries}). Stopping reparametrisation loop.")
     return "skip"
 
-  elif state.validation_passed:
-    print("---> Validation passed. Moving to next phase.")
-    if state.phase == "generation":
-      mlflow.log_metrics({"raw_gen_trials": state.retry_count})
-    return "skip"
+  
   else:
     return "reparametrise"

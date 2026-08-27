@@ -51,6 +51,13 @@ def parse_args():
   parser.add_argument('--disparity_tolerance', type=float, default=0.03, 
                       help="The acceptable error margin (+/-) allowed around the target disparity values.")
 
+  # BENCHMARK ARGS
+  parser.add_argument('--benchmark_csv', type=str, default="")
+  parser.add_argument('--seeds_list', nargs="+", type=int, default=[42, 123, 999])
+  parser.add_argument('--optimisers_list', nargs="+", type=str, default=["llm", "optuna"])
+  parser.add_argument('--max_retries_llm', type=int, default=10)
+  parser.add_argument('--max_retries_optuna', type=int, default=20)
+
   return parser.parse_args()
 
 def load_config(path):
