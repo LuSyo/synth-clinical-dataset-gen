@@ -1,4 +1,5 @@
 from typing import cast
+import mlflow
 from langgraph.graph import StateGraph, END, START
 from workflow.schema import GraphState
 from workflow.nodes import (
@@ -10,24 +11,31 @@ from workflow.nodes import (
   evaluate_downstream_probe, 
   sample_dataset,
   reparametrise_biased_dataset,
-  reparametrise_raw_dataset
+  reparametrise_raw_dataset,
+  reparametrise_raw_dataset_optuna,
+  reparametrise_biased_dataset_optuna
   )
 
-def build_graph():
+def build_graph(optimiser: str = "llm"):
   workflow = StateGraph(GraphState)
 
   # Add nodes
   workflow.add_node("generate_ground_truth_data", generate_ground_truth_data)
-  workflow.add_node("reparametrise_raw_dataset", reparametrise_raw_dataset)
   workflow.add_node("apply_bias", apply_bias)
   workflow.add_node("generate_plots", generate_plots)
   workflow.add_node("generate_table_one_1", generate_table_one)
   workflow.add_node("generate_table_one_2", generate_table_one)
   workflow.add_node("evaluate_downstream_probe_1", evaluate_downstream_probe)
   workflow.add_node("evaluate_downstream_probe_2", evaluate_downstream_probe)
-  workflow.add_node("reparametrise_biased_dataset", reparametrise_biased_dataset)
   workflow.add_node("sample_dataset", sample_dataset)
   workflow.add_node("save_dataset", save_dataset)
+
+  if optimiser == "llm":
+    workflow.add_node("reparametrise_raw_dataset", reparametrise_raw_dataset)
+    workflow.add_node("reparametrise_biased_dataset", reparametrise_biased_dataset)
+  else:
+    workflow.add_node("reparametrise_raw_dataset", reparametrise_raw_dataset_optuna)
+    workflow.add_node("reparametrise_biased_dataset", reparametrise_biased_dataset_optuna)
 
   # Add edges
   workflow.add_edge(START, "generate_ground_truth_data")
@@ -70,6 +78,7 @@ def route_reparametrise(state: GraphState) -> str:
   """
   if state.phase == "generation" and state.retry_count >= state.max_retries // 2:
     print("---> Skipping reparametrisation: Saving retries budget for bias application.")
+    mlflow.log_metrics({"raw_gen_trials": state.retry_count})
     return "skip"
     
   elif state.retry_count >= state.max_retries:
@@ -78,6 +87,8 @@ def route_reparametrise(state: GraphState) -> str:
 
   elif state.validation_passed:
     print("---> Validation passed. Moving to next phase.")
+    if state.phase == "generation":
+      mlflow.log_metrics({"raw_gen_trials": state.retry_count})
     return "skip"
   else:
     return "reparametrise"

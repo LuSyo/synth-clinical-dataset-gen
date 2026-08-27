@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Annotated, Optional, Literal
+from typing import List, Annotated, Optional, Literal, Any
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 import pandas as pd
@@ -67,6 +67,12 @@ class GraphState(BaseModel):
 
   input_tokens: int = Field(default=0, description="Total Input Tokens used by API calls")
   output_tokens: int = Field(default=0, description="Total Output Tokens used by API calls")
+
+  #Optuna study
+  optuna_raw_study: Optional[Any] = Field(default=None, description="Persisted Optuna study for raw dataset tuning")
+  optuna_bias_study: Optional[Any] = Field(default=None, description="Persisted Optuna study for biased dataset tuning")
+  last_raw_optuna_trial: Optional[int] = Field(default=None, description="Trial ID of the last raw ask")
+  last_bias_optuna_trial: Optional[int] = Field(default=None, description="Trial ID of the last bias ask")
 
   def __repr__(self):
     return (

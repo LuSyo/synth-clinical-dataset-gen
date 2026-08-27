@@ -25,14 +25,11 @@ def main():
   # MASTER RANDOM GENERATOR
   rng = np.random.default_rng(seed=args.seed)
 
-  result_dir = os.path.join(Config.RESULTS_DIR, args.exp_name, args.run_name)
-  os.makedirs(result_dir, exist_ok=True)
-
   feature_map = load_config(args.mapping)
 
   set_mlflow_exp(args.exp_name, Config.MLFLOW_TRACKING_URI)
 
-  app = build_graph()
+  app = build_graph(optimiser=args.optimiser)
 
   # Set up the RunnableConfig
   validation_llm = ChatOpenAI(
@@ -70,7 +67,15 @@ def main():
       seed=args.seed
     )
 
-    app.invoke(initial_state, config)
+    final_state = app.invoke(initial_state, config)
+
+    metrics_to_log = {
+      "retry_count": int(final_state['retry_count']),
+      "input_tokens": int(final_state['input_tokens']),
+      "output_tokens": int(final_state['output_tokens'])
+    }
+
+    mlflow.log_metrics(metrics_to_log)
 
 if __name__ == "__main__":
   main()

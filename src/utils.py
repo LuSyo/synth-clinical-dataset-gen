@@ -21,6 +21,8 @@ def parse_args():
   parser.add_argument('--exp_name', type=str, default=date_str)
   parser.add_argument('--run_name', type=str, default=date_str)
 
+  parser.add_argument('--optimiser', type=str, default="llm")
+
   parser.add_argument('--mapping', type=str, required=True)
 
   parser.add_argument('--max_retries', type=int, default=3)

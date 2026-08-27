@@ -2,6 +2,8 @@ import os
 import json
 import copy
 import numpy as np
+import optuna
+import mlflow
 from typing import Optional
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
@@ -226,6 +228,15 @@ def evaluate_downstream_probe(state: GraphState, config: RunnableConfig) -> dict
     
   print(f"Success! Downstream probe results written to: {report_path}")
 
+  # LOG METRICS TRAJECTORY TO MLFLOW
+  metrics_to_log = {
+    "auprc": float(auprc),
+    "recall_disp": float(recall_disp),
+    "ppv_disp": float(precision_disp),
+  }
+
+  mlflow.log_metrics(metrics_to_log, step=state.retry_count)
+
   return {
     "probe_results": accumulated_abridged_results,
     "current_auprc": auprc,
@@ -318,8 +329,8 @@ def reparametrise_raw_dataset(state: GraphState, config: RunnableConfig) -> dict
   # ------ USAGE ------
   raw_message = response["raw"]
   usage = getattr(raw_message, "usage_metadata", {}) or {}
-  updates["input_tokens"] = usage.get("input_tokens", 0)
-  updates["output_tokens"] = usage.get("output_tokens", 0)
+  updates["input_tokens"] = usage.get("input_tokens", 0) + state.input_tokens
+  updates["output_tokens"] = usage.get("output_tokens", 0) + state.output_tokens
   # -------------------
 
   print(f"[Reparametrisation Reasoning]: {result.reasoning}")
@@ -464,8 +475,8 @@ def reparametrise_biased_dataset(state: GraphState, config: RunnableConfig) -> d
   # ------ USAGE ------
   raw_message = response["raw"]
   usage = getattr(raw_message, "usage_metadata", {}) or {}
-  updates["input_tokens"] = usage.get("input_tokens", 0)
-  updates["output_tokens"] = usage.get("output_tokens", 0)
+  updates["input_tokens"] = usage.get("input_tokens", 0) + state.input_tokens
+  updates["output_tokens"] = usage.get("output_tokens", 0) + state.output_tokens
   # -------------------
 
   print(f"[Reparametrisation Reasoning]: {result.reasoning}")
@@ -500,3 +511,127 @@ def reparametrise_biased_dataset(state: GraphState, config: RunnableConfig) -> d
   updates["feature_map"] = updated_map
 
   return updates
+
+def reparametrise_raw_dataset_optuna(state: GraphState, config: RunnableConfig) -> dict:
+  print(f"---> [Optuna] Reparametrising Raw Features (Trial {state.retry_count})")
+  
+  current_trial = state.retry_count
+  next_trial = current_trial + 1
+  
+  study = state.optuna_raw_study
+  if study is None:
+    study = optuna.create_study(direction="minimize")
+  
+  # Report previous trial results to the optimizer
+  if current_trial > 0 and state.last_raw_optuna_trial is not None:
+      # Loss: Absolute distance from target AUPRC
+      loss = max(state.target_raw_auprc - state.current_auprc, 0)
+      study.tell(state.last_raw_optuna_trial, loss)
+      
+  # Generate new parameters
+  trial = study.ask()
+  last_trial_number = trial.number
+  
+  # Apply overrides to feature_map
+  updated_map = copy.deepcopy(state.feature_map)
+  current_trial_key = f"parameters_trial_{current_trial}"
+  next_trial_key = f"parameters_trial_{next_trial}"
+  
+  for pathway, features in updated_map.items():
+    for feature in features:
+      name = feature["name"]
+      f_type = feature.get("type", "continuous")
+      
+      # Carry over current params, then overwrite
+      if current_trial_key in feature:
+        feature[next_trial_key] = copy.deepcopy(feature[current_trial_key])
+      else:
+        feature[next_trial_key] = {}
+          
+      # Sample parameters based on datatype
+      if f_type == "continuous":
+        feature[next_trial_key]["gamma"] = trial.suggest_float(f"{name}_gamma", -2.0, 2.0)
+        feature[next_trial_key]["beta"] = trial.suggest_float(f"{name}_beta", -1.0, 1.0)
+        feature[next_trial_key]["noise_std"] = trial.suggest_float(f"{name}_noise_std", 0.1, 1.5)
+      elif f_type == "binary":
+        feature[next_trial_key]["gamma"] = trial.suggest_float(f"{name}_gamma", -1.8, 1.8)
+        feature[next_trial_key]["beta"] = trial.suggest_float(f"{name}_beta", -0.5, 0.5)
+      elif f_type == "categorical":
+        feature[next_trial_key]["gamma"] = trial.suggest_float(f"{name}_gamma", -1.5, 1.5)
+        feature[next_trial_key]["noise_std"] = trial.suggest_float(f"{name}_noise_std", 0.2, 1.0)
+
+  return {
+    "retry_count": next_trial,
+    "feature_map": updated_map,
+    "optuna_raw_study": study,
+    "last_raw_optuna_trial": last_trial_number
+  }
+
+def reparametrise_biased_dataset_optuna(state: GraphState, config: RunnableConfig) -> dict:
+  print(f"---> [Optuna] Reparametrising Biased Features (Trial {state.retry_count})")
+  
+  # Skip if no target disparity is set
+  if state.target_disp == TargetDisp.none:
+    return {}
+      
+  current_trial = state.retry_count
+  next_trial = current_trial + 1
+  
+  study = state.optuna_bias_study
+  if study is None:
+    study = optuna.create_study(direction="minimize")
+  
+  # Report previous trial results
+  if state.last_bias_optuna_trial is not None:
+    loss = 0.0
+    if state.target_disp in [TargetDisp.both, TargetDisp.recall]:
+      loss += max(abs(state.current_recall_disp - state.target_biased_recall_disp) - state.disparity_tolerance, 0)
+    if state.target_disp in [TargetDisp.both, TargetDisp.ppv]:
+      loss += max(abs(state.current_precision_disp - state.target_biased_ppv_disp) - state.disparity_tolerance, 0)
+        
+    study.tell(state.last_bias_optuna_trial, loss)
+      
+  # Generate new parameters
+  trial = study.ask()
+  last_trial_number = trial.number
+  
+  # Apply overrides to feature_map bias parameters
+  updated_map = copy.deepcopy(state.feature_map)
+  current_trial_key = f"parameters_trial_{current_trial}"
+  next_trial_key = f"parameters_trial_{next_trial}"
+  
+  # Ensure current state carries over
+  for feature in updated_map.get("soc", []):
+    if current_trial_key in feature:
+        feature[next_trial_key] = copy.deepcopy(feature[current_trial_key])
+    else:
+        feature[next_trial_key] = {}
+        
+    if "bias_params" not in feature[next_trial_key]:
+        feature[next_trial_key]["bias_params"] = {}
+        
+    bias = feature.get("bias")
+    if not bias:
+      continue
+        
+    name = feature["name"]
+    b_type = bias.get("type")
+    
+    # Sample parameters mapped exactly to your bias schema
+    if b_type == "measurement_error":
+      feature[next_trial_key]["bias_params"]["mu_bias"] = trial.suggest_float(f"{name}_mu_bias", -3.0, 3.0)
+      feature[next_trial_key]["bias_params"]["noise_std"] = trial.suggest_float(f"{name}_noise_std", 0.1, 2.0)
+    elif b_type == "access_barrier":
+      feature[next_trial_key]["bias_params"]["alpha"] = trial.suggest_float(f"{name}_alpha", 0.01, 1.0)
+      feature[next_trial_key]["bias_params"]["noise_std"] = trial.suggest_float(f"{name}_noise_std", 0.05, 0.5)
+    elif b_type == "referral_bias":
+      feature[next_trial_key]["bias_params"]["p_suppress"] = trial.suggest_float(f"{name}_p_suppress", 0.0, 1.0)
+    elif b_type == "under_classification":
+      feature[next_trial_key]["bias_params"]["p_down"] = trial.suggest_float(f"{name}_p_down", 0.0, 1.0)
+
+  return {
+    "retry_count": next_trial,
+    "feature_map": updated_map,
+    "optuna_bias_study": study,
+    "last_bias_optuna_trial": last_trial_number
+  }
