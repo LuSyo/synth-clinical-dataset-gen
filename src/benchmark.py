@@ -11,6 +11,7 @@ from langchain_core.runnables import RunnableConfig
 from utils import parse_args, load_config, set_global_seeds, Config, set_mlflow_exp
 from workflow.graph import build_graph
 from workflow.schema import GraphState
+from generation.analysis import evaluate_downstream_transferability
 from enums import TargetDisp
 
 def run_benchmark():
@@ -114,7 +115,20 @@ def run_benchmark():
               "output_tokens": int(final_state.get("output_tokens", 0)),
               "wall_clock_sec": elapsed_time
             })
-            print(f"--> Success ({elapsed_time:.1f}s)")
+            print(f"---> Generation completed ({elapsed_time:.1f}s)")
+
+            if final_state.get("df") is not None:
+              print("---> Evaluating Downstream Performance and Disparity (LR, RF, MLP)")
+              downstream_metrics = evaluate_downstream_transferability(
+                df=final_state['df'],
+                n_train=args.n_train,
+                n_test=args.n_test,
+                n_boot=args.n_boot,
+                feature_map=base_feature_map,
+                rng=rng
+              )
+              mlflow.log_metrics(downstream_metrics)
+              print(f"---> Donwstream evaluation completed")
 
           except Exception as e:
             print(f"--> [ERROR] Run failed: {str(e)}")

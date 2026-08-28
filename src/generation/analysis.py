@@ -6,8 +6,13 @@ import seaborn as sns
 from typing import List, cast, Tuple
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
 from sklearn.metrics import average_precision_score, recall_score, precision_score
+from sklearn.model_selection import train_test_split
 from tableone import TableOne
+
 
 def plot_cont_feature(
   df: pd.DataFrame, 
@@ -290,3 +295,93 @@ def run_downstream_probe(
   markdown_table = report_df.to_markdown(index=False)
 
   return markdown_table, mean_auprc, recall_disparity, precision_disparity
+
+def evaluate_downstream_transferability(
+  df: pd.DataFrame,
+  n_train: int,
+  n_test: int,
+  n_boot: int,
+  feature_map: dict,
+  rng: np.random.Generator
+):
+
+  features = []
+  for pathway in ['ind', 'bio', 'soc']:
+    for f in feature_map.get(pathway, []):
+      base_name = f['name']
+      obs_name = f.get('observed_feature')
+      
+      if obs_name and obs_name in df.columns:
+        features.append(obs_name)
+      elif base_name in df.columns:
+        features.append(base_name)
+
+  n_pop = len(df)
+  indices = np.arange(n_pop)
+
+  model_names = ["lr", "rf", "mlp"]
+  bootstrap_metrics = {
+    name: {"auprc": [], "recall_disp": [], "ppv_disp": []} 
+    for name in model_names
+  }
+
+  for _ in range(n_boot):
+    train_df, test_df = train_test_split(
+      df,
+      test_size=n_test,
+      train_size=n_train,
+      stratify=df[['S', 'Y']],
+      random_state=int(rng.integers(0, 100000))
+    )
+
+    X_train, y_train = train_df[features], train_df['Y']
+    X_test, y_test = test_df[features], test_df['Y']
+    s_test = test_df['S'].values
+
+    models = {
+      "lr": make_pipeline(
+        StandardScaler(),
+        LogisticRegression(
+          max_iter=1000, 
+          random_state=int(rng.integers(0, 100000)))
+        ),
+      "rf": RandomForestClassifier(
+        n_estimators=100, 
+        max_depth=6, 
+        random_state=int(rng.integers(0, 100000))),
+      "mlp": make_pipeline(
+        StandardScaler(), 
+        MLPClassifier(
+          hidden_layer_sizes=(32, 16), 
+          max_iter=500, 
+          early_stopping=True, 
+          random_state=int(rng.integers(0, 100000)))
+      ),
+    }
+
+    global_threshold = y_train.sum()/len(y_train)
+
+    for name, clf in models.items():
+      clf.fit(X_train, y_train)
+      y_prob = clf.predict_proba(X_test)[:, 1]
+      y_pred = (y_prob > global_threshold).astype(int)
+    
+      auprc = average_precision_score(y_test, y_prob)
+
+      rec_maj = recall_score(y_test[s_test == 1], y_pred[s_test == 1], zero_division=np.nan)
+      rec_min = recall_score(y_test[s_test == 0], y_pred[s_test == 0], zero_division=np.nan)
+      ppv_maj = precision_score(y_test[s_test == 1], y_pred[s_test == 1], zero_division=np.nan)
+      ppv_min = precision_score(y_test[s_test == 0], y_pred[s_test == 0], zero_division=np.nan)
+
+      bootstrap_metrics[name]["auprc"].append(auprc)
+      bootstrap_metrics[name]["recall_disp"].append(rec_maj - rec_min)
+      bootstrap_metrics[name]["ppv_disp"].append(ppv_maj - ppv_min)
+
+  final_results = {}
+  for name in model_names:
+    for metric_key in ["auprc", "recall_disp", "ppv_disp"]:
+      values = np.array(bootstrap_metrics[name][metric_key])
+      final_results[f"downstream_{name}_{metric_key}_mean"] = float(np.nanmean(values))
+      final_results[f"downstream_{name}_{metric_key}_std"] = float(np.nanstd(values))
+
+  return final_results

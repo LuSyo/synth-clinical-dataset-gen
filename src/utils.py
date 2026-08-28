@@ -53,6 +53,7 @@ def parse_args():
 
   # BENCHMARK ARGS
   parser.add_argument('--benchmark_csv', type=str, default="")
+  parser.add_argument('--n_boot', type=int, default=5)
   parser.add_argument('--seeds_list', nargs="+", type=int, default=[42, 123, 999])
   parser.add_argument('--optimisers_list', nargs="+", type=str, default=["llm", "optuna"])
   parser.add_argument('--max_retries_llm', type=int, default=10)

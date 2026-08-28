@@ -27,7 +27,7 @@ def build_graph(optimiser: str = "llm"):
   workflow.add_node("generate_table_one_2", generate_table_one)
   workflow.add_node("evaluate_downstream_probe_1", evaluate_downstream_probe)
   workflow.add_node("evaluate_downstream_probe_2", evaluate_downstream_probe)
-  workflow.add_node("sample_dataset", sample_dataset)
+  # workflow.add_node("sample_dataset", sample_dataset)
   workflow.add_node("save_dataset", save_dataset)
 
   if optimiser == "llm":
@@ -59,14 +59,14 @@ def build_graph(optimiser: str = "llm"):
     "evaluate_downstream_probe_2", 
     route_reparametrise,
     {
-      "skip": "sample_dataset",
+      "skip": "save_dataset", #TEMP FIX
       "reparametrise": "reparametrise_biased_dataset"
     })
 
   workflow.add_edge("reparametrise_biased_dataset", "apply_bias")
 
-  workflow.add_edge("sample_dataset", "generate_plots")
-  workflow.add_edge("generate_plots", "save_dataset")
+  # workflow.add_edge("sample_dataset", "generate_plots")
+  # workflow.add_edge("generate_plots", "save_dataset")
   workflow.add_edge("save_dataset", END)
 
   return workflow.compile()
