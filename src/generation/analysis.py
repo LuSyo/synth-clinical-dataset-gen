@@ -5,12 +5,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import List, cast, Tuple
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import average_precision_score, recall_score, precision_score
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
+from sklearn.calibration import CalibratedClassifierCV
 from tableone import TableOne
 
 
@@ -171,11 +172,11 @@ def run_downstream_probe(
   rng: np.random.Generator
   ) -> Tuple[str | None, float, float]:
   """
-    Trains a RandomForest classifier probe across 4 bootstrap iterations.
+    Trains an ensemble probe across 5 stratified suffled splits.
     Evaluates predictive performance metrics globally and stratified across S subgroups,
     and saves the final aggregated summary report as a Markdown table.
   """
-  print("---> Running Downstream Predictive Probe (4 Bootstrap Rounds)")
+  print("---> Running Probe...")
 
   S = df['S']
   subgroups = sorted(S.unique().astype(int))
@@ -199,42 +200,80 @@ def run_downstream_probe(
     g: {"auprc": [], "recall": [], "precision": []} for g in subgroups
   }
 
-  n_pop = len(df)
-  indices = np.arange(n_pop)
+  sss = StratifiedShuffleSplit(
+    n_splits=5,
+    train_size=n_train,
+    test_size=n_test,
+    random_state=int(rng.integers(0, 100000)),
+  )
+  strat_key = S.astype(str) + "_" + y.astype(str)
 
-  for boot_round in range(4):
-    # Bootstrap training sample
-    train_idx = rng.choice(indices, size=n_train, replace=True)
-    # OOB test samples 
-    oob_idx = np.setdiff1d(indices, train_idx)
-    test_size = min(len(oob_idx), n_test)
-    test_idx = rng.choice(oob_idx, size=test_size, replace=False)
-
+  for split_id, (train_idx, test_idx) in enumerate(sss.split(X, strat_key)):
     X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
     y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
     s_test = S.iloc[test_idx]
 
-    # Fit and apply scaler
-    scaler = StandardScaler()
-    X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train), columns=pd.Index(features), index=X_train.index)
-    X_test_scaled = pd.DataFrame(scaler.transform(X_test), columns=pd.Index(features), index=X_test.index)
-    
-    # Fit probe exactly once per fold
-    probe = RandomForestClassifier(
-      n_estimators=300,
-      min_samples_leaf=5,
-      random_state=int(rng.integers(0, 100000))
+    split_seed = int(rng.integers(0, 100000))
+
+    # LR pipeline
+    lr_pipe = make_pipeline(
+      StandardScaler(),
+      LogisticRegression(max_iter=500, C=1.0, random_state=split_seed)
     )
-    probe.fit(X_train_scaled, y_train)
+    cal_lr = CalibratedClassifierCV(
+      estimator=lr_pipe, method="sigmoid", cv=3
+    )
+    cal_lr.fit(X_train, y_train)
+    lr_probs = cast(np.ndarray, cal_lr.predict_proba(X_test))[:, 1]
 
-    raw_probs = cast(np.ndarray, probe.predict_proba(X_test_scaled))
-    y_pred_prob = raw_probs[:, 1]
+    # Histogram GBDT pipeline
+    hgb_model = HistGradientBoostingClassifier(
+      max_iter=60,
+      max_leaf_nodes=15,
+      min_samples_leaf=10,
+      learning_rate=0.05,
+      random_state=split_seed,
+      verbose=0,
+    )
+    cal_hgb = CalibratedClassifierCV(
+      estimator=hgb_model, method="sigmoid", cv=3
+    )
+    cal_hgb.fit(X_train, y_train)
+    hgb_probs = cast(np.ndarray, cal_hgb.predict_proba(X_test))[:, 1]
 
-    global_threshold = y_train.sum()/len(y_train)
-    y_pred = (y_pred_prob > global_threshold).astype(int)
+    # ENSEMBLE PROBABILITY
+    y_pred_prob = 0.5 * lr_probs + 0.5 * hgb_probs    
+
+    # THRESHOLD JITTERING
+    base_threshold = float(y_train.mean())
+    jitter_range = (-0.04, -0.02, 0.0, 0.02, 0.04)
+    thresholds = [
+      np.clip(base_threshold + offset, 0.01, 0.99) for offset in jitter_range
+    ]
+
+    # Global AUPRC
     global_metrics["auprc"].append(average_precision_score(y_test, y_pred_prob))
-    global_metrics["recall"].append(recall_score(y_test, y_pred))
-    global_metrics["precision"].append(precision_score(y_test, y_pred))
+
+    # Global jittered metrics
+    split_recalls = [
+      recall_score(
+        y_test,
+        (y_pred_prob >= t).astype(int),
+        zero_division = np.nan
+      )
+      for t in thresholds
+    ]
+    split_precisions = [
+      precision_score(
+        y_test,
+        (y_pred_prob >= t).astype(int),
+        zero_division = np.nan
+      )
+      for t in thresholds
+    ]
+
+    global_metrics["recall"].append(np.nanmean(split_recalls))
+    global_metrics["precision"].append(np.nanmean(split_precisions))
 
     for g in subgroups:
       subgroup_mask = (s_test == g)
@@ -245,16 +284,32 @@ def run_downstream_probe(
       y_test_sub = y_test[subgroup_mask]
       y_pred_prob_sub = y_pred_prob[subgroup_mask] 
 
-      y_pred_sub = (y_pred_prob_sub > global_threshold).astype(int)
-
       if y_test_sub.sum() > 0:
         subgroup_metrics[g]["auprc"].append(average_precision_score(y_test_sub, y_pred_prob_sub))  
-        subgroup_metrics[g]["recall"].append(recall_score(y_test_sub, y_pred_sub))
+
+        sub_recalls = [
+          recall_score(
+            y_test_sub,
+            (y_pred_prob_sub >= t).astype(int),
+            zero_division = np.nan
+          )
+          for t in thresholds
+        ]
       else:
         subgroup_metrics[g]["auprc"].append(np.nan)
-        subgroup_metrics[g]["recall"].append(np.nan)
+        sub_recalls = [np.nan]
 
-      subgroup_metrics[g]["precision"].append(precision_score(y_test_sub, y_pred_sub))
+      sub_precisions = [
+        precision_score(
+          y_test_sub,
+          (y_pred_prob_sub >= t).astype(int),
+          zero_division=np.nan,  # type: ignore
+        )
+        for t in thresholds
+      ]
+
+      subgroup_metrics[g]["recall"].append(np.nanmean(sub_recalls))
+      subgroup_metrics[g]["precision"].append(np.nanmean(sub_precisions))
 
 
   # --- AGREGATE RESULTS ---
